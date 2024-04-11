@@ -978,8 +978,6 @@ enum bpf_prog_type {
 	BPF_PROG_TYPE_LSM,
 	BPF_PROG_TYPE_SK_LOOKUP,
 	BPF_PROG_TYPE_SYSCALL, /* a program that can execute syscalls */
-	BPF_PROG_TYPE_XRP,
-	BPF_PROG_TYPE_IOURING,
 };
 
 enum bpf_attach_type {
@@ -1027,8 +1025,6 @@ enum bpf_attach_type {
 	BPF_PERF_EVENT,
 	BPF_TRACE_KPROBE_MULTI,
 	BPF_LSM_CGROUP,
-	BPF_XRP,
-	BPF_IOURING,
 	__MAX_BPF_ATTACH_TYPE
 };
 
@@ -5426,18 +5422,6 @@ union bpf_attr {
  *		BPF_RB_FORCE_WAKEUP flag is passed, a wakeup notification will
  *		be sent even if no sample was drained.
  *
- * long bpf_io_uring_submit(struct io_ring_ctx *ctx, void *sqe, u32 size)
- * 	Description
- * 		Accepts *ctx*, the context of the program representing an
- * 		io_uring instance, and submits a new request described by
- * 		*sqe*.
- * 	Return
- * 		The number of submitted requests or a negative error if failed.
- *
- * long bpf_uring_write_user(void __user * unsafe_ptr, const void * src,  u32 size)
- * 	Description
- *    
- * 	Return
  *		On failure, the returned value is one of the following:
  *
  *		**-EBUSY** if the ring buffer is contended, and another calling
@@ -5663,9 +5647,6 @@ union bpf_attr {
 	FN(tcp_raw_check_syncookie_ipv6),	\
 	FN(ktime_get_tai_ns),		\
 	FN(user_ringbuf_drain),		\
-	FN(io_uring_submit),		\
-	FN(uring_write_user),		\
-	FN(uring_file_read),		\
 	/* */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
@@ -6999,14 +6980,6 @@ struct bpf_core_relo {
 	__u32 type_id;
 	__u32 access_str_off;
 	enum bpf_core_relo_kind kind;
-};
-
-struct bpf_xrp {
-	__s32 done;
-	__u64 next_addr[16];
-	__u64 size[16];
-	char *data;
-	char *scratch;
 };
 
 #endif /* _UAPI__LINUX_BPF_H__ */

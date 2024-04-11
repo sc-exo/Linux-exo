@@ -2885,7 +2885,7 @@ void blk_mq_submit_bio(struct bio *bio)
 	struct request *rq;
 	unsigned int nr_segs = 1;
 	blk_status_t ret;
-
+	int i=0;
 	bio = blk_queue_bounce(bio, q);
 	if (bio_may_exceed_limits(bio, &q->limits))
 		bio = __bio_split_to_limits(bio, &q->limits, &nr_segs);
@@ -2922,6 +2922,23 @@ void blk_mq_submit_bio(struct bio *bio)
 		blk_insert_flush(rq);
 		return;
 	}
+	if(bio->inode!=NULL)
+	{
+		if(bio->inode->ib_enable)
+		{
+			rq->ib_enable = 1;
+			rq->ib_es_num = bio->inode->ib_es_num;
+			rq->inode     = bio->inode;
+			for(i =0; i<  bio->inode->ib_es_num; i++)
+			{
+				rq->ib_es[i].es_lblk = bio->inode->ib_es[i].es_lblk;
+				rq->ib_es[i].es_len = bio->inode->ib_es[i].es_len;
+				rq->ib_es[i].es_pblk = bio->inode->ib_es[i].es_pblk;
+			}
+			bio->inode->ib_es_num=0;
+		}
+	}
+
 
 	if (plug)
 		blk_add_rq_to_plug(plug, rq);

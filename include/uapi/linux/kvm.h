@@ -1455,10 +1455,7 @@ struct kvm_vfio_spapr_tce {
 					struct kvm_userspace_memory_region)
 #define KVM_SET_TSS_ADDR          _IO(KVMIO,   0x47)
 #define KVM_SET_IDENTITY_MAP_ADDR _IOW(KVMIO,  0x48, __u64)
-#define KVM_SET_ROUTER_FD         _IO(KVMIO,   0x49)
-#define KVM_SET_RING_FD         _IO(KVMIO,   0x4a)
-#define KVM_GET_ROUTER_ADDR        _IOWR(KVMIO,   0x4b, __u64)
-#define KVM_GET_ROUTER_ENABLE        _IO(KVMIO,   0x4c)
+
 /* enable ucontrol for s390 */
 struct kvm_s390_ucas_mapping {
 	__u64 user_addr;

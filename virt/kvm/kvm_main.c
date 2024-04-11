@@ -14,7 +14,7 @@
  */
 
 #include <kvm/iodev.h>
-#include <linux/bpf.h>
+
 #include <linux/kvm_host.h>
 #include <linux/kvm.h>
 #include <linux/module.h>
@@ -52,21 +52,19 @@
 #include <linux/lockdep.h>
 #include <linux/kthread.h>
 #include <linux/suspend.h>
-#include <linux/err.h>
+
 #include <asm/processor.h>
 #include <asm/ioctl.h>
 #include <linux/uaccess.h>
-#include <linux/fs.h>
+
 #include "coalesced_mmio.h"
 #include "async_pf.h"
 #include "kvm_mm.h"
 #include "vfio.h"
-#include "qemu.h"
-#include <linux/eventfd.h>
-#include <linux/io_uring.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/kvm.h>
-#include <linux/syscalls.h>
+
 #include <linux/kvm_dirty_ring.h>
 
 /* Worst case buffer size needed for holding an integer. */
@@ -475,23 +473,10 @@ static void kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id)
 	vcpu->kvm = kvm;
 	vcpu->vcpu_id = id;
 	vcpu->pid = NULL;
-	vcpu->ring_fd = 0;
 #ifndef __KVM_HAVE_ARCH_WQP
 	rcuwait_init(&vcpu->wait);
 #endif
 	kvm_async_pf_vcpu_init(vcpu);
-
-	if(kvm->map!=NULL)
-	{
-		vcpu->map = kvm->map;
-		printk("kvm_vcpu_init\n");
-	}
-	if(kvm->ring_fd>0)
-	{
-		vcpu->ring_fd = kvm->ring_fd;
-		printk("kvm_vcpu_ ring_fd init,fd is %d\n",kvm->ring_fd);
-	}		
-
 
 	kvm_vcpu_set_in_spin_loop(vcpu, false);
 	kvm_vcpu_set_dy_eligible(vcpu, false);
@@ -509,7 +494,7 @@ static void kvm_vcpu_destroy(struct kvm_vcpu *vcpu)
 {
 	kvm_arch_vcpu_destroy(vcpu);
 	kvm_dirty_ring_free(&vcpu->dirty_ring);
-	// kfree(vcpu->map);
+
 	/*
 	 * No need for rcu_read_lock as VCPU_RUN is the only place that changes
 	 * the vcpu->pid pointer, and at destruction time all file descriptors
@@ -1171,7 +1156,7 @@ static struct kvm *kvm_create_vm(unsigned long type, const char *fdname)
 
 	INIT_LIST_HEAD(&kvm->devices);
 	kvm->max_vcpus = KVM_MAX_VCPUS;
-	kvm->enable_router = 0;
+
 	BUILD_BUG_ON(KVM_MEM_SLOTS_NUM > SHRT_MAX);
 
 	/*
@@ -1305,7 +1290,7 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	list_del(&kvm->vm_list);
 	mutex_unlock(&kvm_lock);
 	kvm_arch_pre_destroy_vm(kvm);
-	// kfree(kvm->router);
+
 	kvm_free_irq_routing(kvm);
 	for (i = 0; i < KVM_NR_BUSES; i++) {
 		struct kvm_io_bus *bus = kvm_get_bus(kvm, i);
@@ -4596,59 +4581,6 @@ int __attribute__((weak)) kvm_vm_ioctl_enable_cap(struct kvm *kvm,
 	return -EINVAL;
 }
 
-static int kvm_vm_ioctl_set_router_map(struct kvm *kvm,
-					   int fd)
-{
-	if(fd==0)
-	{
-		printk("bpf get fd error \n");
-			return -EINVAL;
-	}
-	kvm->map = bpf_map_get(fd);
-	if (IS_ERR(kvm->map))
-	{
-		printk("bpf get error \n");
-		return -EINVAL;
-	}
-	else
-	{
-		printk("kvm_vm_ioctl_set_router_map success \n");
-		return 0;
-	}
-}
-
-static int kvm_vm_ioctl_set_ring_fd(struct kvm *kvm, int ring_fd)
-{
-	if(ring_fd==0)
-	{
-		printk("bpf get fd error \n");
-		return -EINVAL;
-	}
-	kvm->ring_fd = ring_fd;
-	return 0;
-}
-static int kvm_vm_ioctl_set_router(struct kvm *kvm, u64 *router_addr)
-{
-	int i;
-	for(i = 0;i<8;i++)
-	{
-		mutex_init(&kvm->router[i].router_lock);
-		mutex_lock(&kvm->router[i].router_lock);
-		kvm->router[i].router = 0;
-		mutex_unlock(&kvm->router[i].router_lock);
-	}
-		*router_addr = (u64)kvm->router;
-		printk("kvm_vm_ioctl_set_router set success!,router addr is %llx\n",*router_addr);
-		return 0;
-
-}
-static int kvm_vm_ioctl_set_roueter_enable(struct kvm *kvm, u32 enable)
-{
-
-		kvm->enable_router = enable;
-		return 0;
-
-}
 static int kvm_vm_ioctl_enable_cap_generic(struct kvm *kvm,
 					   struct kvm_enable_cap *cap)
 {
@@ -4736,47 +4668,13 @@ static long kvm_vm_ioctl(struct file *filp,
 	struct kvm *kvm = filp->private_data;
 	void __user *argp = (void __user *)arg;
 	int r;
-	
+
 	if (kvm->mm != current->mm || kvm->vm_dead)
 		return -EIO;
 	switch (ioctl) {
 	case KVM_CREATE_VCPU:
 		r = kvm_vm_ioctl_create_vcpu(kvm, arg);
 		break;
-	case KVM_SET_ROUTER_FD:{
-		int fd;
-		r = -EFAULT;
-		if (copy_from_user(&fd, argp, sizeof(int)))
-			goto out;
-		r = kvm_vm_ioctl_set_router_map(kvm, fd);
-		break;
-	}
-	case KVM_GET_ROUTER_ENABLE:{
-		u32 enable;
-		r = -EFAULT;
-		if (copy_from_user(&enable, argp, sizeof(u32)))
-			goto out;
-		r = kvm_vm_ioctl_set_roueter_enable(kvm, enable);
-		break;
-	}
-	case KVM_SET_RING_FD:{
-		int ring_fd;
-		r = -EFAULT;
-		if (copy_from_user(&ring_fd, argp, sizeof(int)))
-			goto out;
-		r = kvm_vm_ioctl_set_ring_fd(kvm, ring_fd);
-		break;
-	}
-	case KVM_GET_ROUTER_ADDR:{
-		__u64 router_addr;
-		r = -EFAULT;
-		r = kvm_vm_ioctl_set_router(kvm, &router_addr);
-		if(r<0)
-			goto out;
-		if (copy_to_user(argp, &router_addr, sizeof(__u64)))
-			goto out;
-		break;
-	}
 	case KVM_ENABLE_CAP: {
 		struct kvm_enable_cap cap;
 
@@ -5315,159 +5213,11 @@ static int kvm_io_bus_get_first_dev(struct kvm_io_bus *bus,
 	return off;
 }
 
-static inline size_t
-iov_to_buf(const struct iovec *iov, const unsigned int iov_cnt,
-           size_t offset, void *buf, size_t bytes)
-{
-    if ( iov_cnt && offset <= iov[0].iov_len && bytes <= iov[0].iov_len - offset)
-        {
-			if (copy_from_user(buf, iov[0].iov_base + offset, bytes))
-			{
-				bytes =  -1;
-			}
-			
-        }
-	return bytes;
-}
-
-
-size_t iov_size(const struct iovec *iov, const unsigned int iov_cnt)
-{
-    size_t len;
-    unsigned int i;
-
-    len = 0;
-    for (i = 0; i < iov_cnt; i++) {
-        len += iov[i].iov_len;
-    }
-    return len;
-}
-
-
-
-// static int virtio_blk_handle_request(struct fast_map *fastmap)
-// {
-//     unsigned int  type;
-//     struct iovec out_iov;
-//     unsigned int in_num;
-//     unsigned int out_num;
-// 	struct VirtIOBlockReq *req;
-// 	unsigned int ret;
-// 	in_num = 2;
-// 	out_num = 1;
-// 	out_iov = fastmap->iovec[0];
-
-
-// 	req = kmalloc(sizeof(*req), GFP_KERNEL);
-// 	req->qiov = fastmap->iovec[1];
-//     req->undo = fastmap->iovec[2];
-
-//     if (unlikely(iov_to_buf(&out_iov, out_num, 0, &req->out,
-//                             sizeof(req->out)) != sizeof(req->out))) {
-//         printk("virtio-blk request outhdr too short\n");
-//         return -1;
-//     }
-
-// 	if(req->qiov.iov_len == 0)
-// 	{
-// 		kfree(req);
-// 		return 0;
-// 	}
-// 	ret =0;
-
-//     type =req->out.type;
-// 	if(type==0&&req->qiov.iov_len==512)
-// 	{
-// 		ret = ksys_pread64(fastmap->fd, req->qiov.iov_base, req->qiov.iov_len, req->out.sector*512);
-		
-// 		if(ret!=req->qiov.iov_len)
-// 		{
-// 			printk("The ksys_pread64 ret is %u\n",ret);
-// 		}
-// 	}
-	
-// 	//*******//
-// 	kfree(req);
-//     return ret;
-// }
-
-
 static int __kvm_io_bus_write(struct kvm_vcpu *vcpu, struct kvm_io_bus *bus,
 			      struct kvm_io_range *range, const void *val)
 {
 	int idx;
-	int vq_id;
-	// u64 newmask;
-	// int err;
-	// int ret;
-	/*****/
-	//get the information from ebpf map
-	// router = 0;
-	// if(range->addr>=0xfe003000&&range->addr<=0xfe00301c)
-	// {
-	// 	wake_up_iouring_evo(11, IORING_ENTER_SQ_WAKEUP);
-	// 	if(vcpu->map==NULL)
-	// 	{
-	// 		map_fd = bpf_obj_get_ib("/sys/fs/bpf/Router");
-	// 		if (map_fd<0)
-	// 		{
-	// 			printk("normal path \n");
-	// 			goto normal;
-	// 		}
-			
-	// 		map = bpf_map_get(map_fd);
-	// 		if (IS_ERR(map))
-	// 		{
-	// 			printk("bpf get error \n");
-	// 			goto normal;
-	// 		}
-	// 		vcpu->map = map;
-	// 	}
 
-	// 	vq_id = (range->addr - 0xfe003000) / 4;
-	// 	// vq_id = 0;
-	// 	key = (void *)&vq_id;
-
-	// 	err = bpf_map_copy_value(vcpu->map, key, &router, BPF_ANY);
-	// 	if (err)
-	// 		goto free_value;
-	// 	// printk("fastmap->fd is %u \n", fastmap->fd);
-	// 	if(router==0)
-	// 	{
-	// 		// printk("******************\n");
-	// 		// printk("normal path \n");
-	// 		goto normal;
-	// 	}
-	// 	else
-	// 	{
-	// 		// wake_up_iouring_evo(11,IORING_ENTER_SQ_WAKEUP);
-	// 		// printk("******************\n");
-	// 		// printk("fast path \n");
-
-	// 		router = 0;
-	// 		if(vcpu->map!=NULL)
-	// 			vcpu->map->ops->map_update_elem(vcpu->map, key, &router, BPF_ANY);
-	// 		goto fast_map;
-
-	// 	}
-	if(!vcpu->kvm->enable_router)
-		goto normal;
-	if(range->addr>=0xfe003000&&range->addr<=0xfe00301c)
-	{
-		vq_id = (range->addr - 0xfe003000) / 4;
-
-		
-		// mutex_lock(&vcpu->kvm->router[vq_id].router_lock);
-
-		vcpu->kvm->router[vq_id].router = 1;
-		// mutex_unlock(&vcpu->kvm->router[vq_id].router_lock);	
-		wake_up_iouring_evo(vcpu->ring_fd+vq_id, IORING_ENTER_SQ_WAKEUP);
-		goto fast_map;
-	}
-
-	/*****/
-normal:
-	// printk("normal path \n");
 	idx = kvm_io_bus_get_first_dev(bus, range->addr, range->len);
 	if (idx < 0)
 		return -EOPNOTSUPP;
@@ -5481,9 +5231,6 @@ normal:
 	}
 
 	return -EOPNOTSUPP;
-
-fast_map:
-	return 1111;
 }
 
 /* kvm_io_bus_write - called under kvm->slots_lock */
@@ -6352,4 +6099,3 @@ int kvm_vm_create_worker_thread(struct kvm *kvm, kvm_vm_thread_fn_t thread_fn,
 
 	return init_context.err;
 }
-

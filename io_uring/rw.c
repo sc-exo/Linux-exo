@@ -11,7 +11,7 @@
 #include <linux/nospec.h>
 #include <linux/compat.h>
 #include <linux/io_uring.h>
-#include <linux/eventfd.h>
+
 #include <uapi/linux/io_uring.h>
 
 #include "io_uring.h"
@@ -19,7 +19,7 @@
 #include "kbuf.h"
 #include "rsrc.h"
 #include "rw.h"
-#include <linux/bpf.h>
+
 struct io_rw {
 	/* NOTE: kiocb has the file as the first member, so don't do it here */
 	struct kiocb			kiocb;
@@ -68,11 +68,7 @@ static int io_iov_buffer_select_prep(struct io_kiocb *req)
 
 	uiov = u64_to_user_ptr(rw->addr);
 	if (copy_from_user(&iov, uiov, sizeof(*uiov)))
-	{
-		printk("io_iov_buffer_select_prep here is error\n");
 		return -EFAULT;
-	}
-		
 	rw->len = iov.iov_len;
 	return 0;
 }
@@ -287,246 +283,8 @@ static inline int io_fixup_rw_res(struct io_kiocb *req, long res)
 	return res;
 }
 
-int update_qemu(struct io_kiocb *req)
-{
-	u_int16_t used_idx;
-	void * key;
-	struct Useraddr *user;
-	struct VRingUsedElem elem;
-	u_int64_t pa;
-	u_int8_t isr;
-	int bpf_ret;
-	int idx;
-	u_int16_t shadow_avail_idx;
-	req->update_qemu += 1;
-	// key = (void *)&;
-	// // printk("key is %lu,\n",*(u_int64_t*)key);
-	// bpf_map_copy_value(req->map, key, &user, BPF_ANY);
-
-	user = (struct Useraddr *)req->map->ops->map_lookup_elem(req->map,&req->cqe.user_data);
-	// if(user.subreq_num>1)
-	// {
-	// 	printk("user.subreq_num > 1!!!!!\n");
-	// 	user.subreq_num-=1;
-		// req->map->ops->map_update_elem(req->map, key, &user, BPF_ANY);
-	// 	return 0;
-	// }
-
-	// printk("avail_idx is 0x%lx,\n",user.avail_idx);
-	// printk("caches_used is 0x%lx,\n",user.caches_used);
-
-	
-	// printk("last_avail_idx is 0x%lx,\n",user.last_avail_idx);
-	// printk("pa is 0x%lx,\n",user.pa);
-	// printk("shadow_avail_idx is 0x%lx,\n",user.shadow_avail_idx);
-	// printk("vdev_isr is 0x%lx,\n",user.vdev_isr);
-	// printk("vring_num is%u,\n",user.vring_num);
-	// printk("vring_used is 0x%lx,\n",user.vring_used);
-	// printk("wfd is %u,\n",user.wfd);
-	// printk("req id is %u,\n",req->cqe.user_data);
-
-	bpf_ret = copy_from_user(&used_idx,user->used_idx,sizeof(u_int16_t));
-	if(bpf_ret<0)
-	{
-		printk("copy_from_user the used_idx error!\n");
-		goto error;
-	}
-	if(user->vring_num!=256)
-	{
-		user->vring_num = 256;
-	}
-	idx = used_idx  % user->vring_num;
-
-	pa = offsetof(VRingUsed, ring[idx]);
-
-	bpf_ret = copy_to_user(user->vring_used+pa,&user->elem,sizeof(VRingUsedElem));
-	if(bpf_ret<0)
-	{
-		printk("update the vring Elem error!, addr is 0x%lx,\n",user->vring_used+pa);
-		goto error;
-	}
-
-	used_idx += 1;
-	pa = offsetof(VRingUsed, idx);
-	bpf_ret = copy_to_user(user->vring_used+pa,&used_idx,sizeof(u_int16_t));
-	if(bpf_ret<0)
-	{
-		printk("update the vring used_idx error! addr is 0x%lx\n",user->vring_used+pa);
-		goto error;
-	}
-
-	bpf_ret = copy_to_user(user->used_idx, &used_idx,sizeof(u_int16_t));
-	if(bpf_ret<0)
-	{
-		printk("update the vq used_idx error! addr is 0x%lx\n",user->used_idx);
-		goto error;
-	}
-	// printk("req->cqe.user_data is %u,used_idx is %u,elem.id is %u, elem.len is %u, update is %u\n",req->cqe.user_data,used_idx,user->elem.id,user->elem.len,req->update_qemu);
-	isr = 0x1;
-	bpf_ret = copy_to_user(user->vdev_isr, &isr,sizeof(u_int8_t));
-	if(bpf_ret<0)
-	{
-		printk("update the vdev_isr error! addr is 0x%lx,\n",user->vdev_isr);
-		goto error;
-	}
-
-	// bpf_ret = copy_from_user(&shadow_avail_idx,user.avail_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the shadow_avail_idx error! addr is 0x%lx\n",user.avail_idx);
-	// 	goto error;
-	// }
-	// printk("cache avail_idx is %u\n",shadow_avail_idx);
-
-	// bpf_ret = copy_to_user(user.shadow_avail_idx, &shadow_avail_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vdev_isr error! addr is 0x%lx,\n",user.shadow_avail_idx);
-	// 	goto error;
-	// }
-	
-
-	// pa = offsetof(VRingUsed, ring[user.vring_num]);
-
-	// bpf_ret = copy_to_user(user.vring_used+pa, &shadow_avail_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vdev_isr error! addr is 0x%lx,\n",user.vring_used+pa);
-	// 	goto error;
-	// }
-
-	eventfd_write_ib(user->wfd);
-	return 0;
-error:
-	printk("update_qemu errorn");
-	return -1;
-}
-
-int update_qemu_test(struct io_kiocb *req)
-{
-	u_int16_t used_idx;
-	void * key;
-	struct Useraddr user;
-	struct VRingUsedElem elem;
-	u_int64_t pa;
-	u_int8_t isr;
-	int bpf_ret;
-	int idx;
-	u_int16_t shadow_avail_idx;
-
-	key = (void *)&req->cqe.user_data;
-	// printk("key is %lu,\n",*(u_int64_t*)key);
-	bpf_map_copy_value(req->map, key, &user, BPF_ANY);
-	
-	// printk("avail_idx is 0x%lx,\n",user.avail_idx);
-	// printk("caches_used is 0x%lx,\n",user.caches_used);
-	// printk("elem.id is %u,\n",user.elem.id);
-	// printk("elem.len is %u,\n",user.elem.len);
-	// printk("last_avail_idx is 0x%lx,\n",user.last_avail_idx);
-	// printk("pa is 0x%lx,\n",user.pa);
-	// printk("shadow_avail_idx is 0x%lx,\n",user.shadow_avail_idx);
-	// printk("vdev_isr is 0x%lx,\n",user.vdev_isr);
-	// printk("vring_num is%u,\n",user.vring_num);
-	// printk("vring_used is 0x%lx,\n",user.vring_used);
-	// printk("wfd is %u,\n",user.wfd);
-	// printk("req id is %u,\n",req->cqe.user_data);
-
-	bpf_ret = copy_from_user(&used_idx,user.used_idx,sizeof(u_int16_t));
-	if(bpf_ret<0)
-	{
-		printk("copy_from_user the used_idx error!\n");
-		goto error;
-	}
-	// printk("used_idx is %u\n",used_idx);
-	if(user.vring_num!=256)
-	{
-		user.vring_num = 256;
-	}
-	idx = used_idx  % user.vring_num;
-
-	pa = offsetof(VRingUsed, ring[idx]);
-
-	// bpf_ret = copy_to_user(user.vring_used+pa,&user.elem,sizeof(VRingUsedElem));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vring Elem error!, addr is 0x%lx,\n",user.vring_used+pa);
-	// 	goto error;
-	// }
-	//  printk("elem id is %u, elem len is %u\n",user.elem.id,user.elem.len);
-
-	used_idx += 1;
-	pa = offsetof(VRingUsed, idx);
-	// bpf_ret = copy_to_user(user.vring_used+pa,&used_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vring used_idx error! addr is 0x%lx\n",user.vring_used+pa);
-	// 	goto error;
-	// }
-
-	// bpf_ret = copy_to_user(user.used_idx, &used_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vq used_idx error! addr is 0x%lx\n",user.used_idx);
-	// 	goto error;
-	// }
-	// printk("vq used_idx is %u\n",used_idx);
-
-	// isr = 0x1;
-	// bpf_ret = copy_to_user(user.vdev_isr, &isr,sizeof(u_int8_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vdev_isr error! addr is 0x%lx,\n",user.vdev_isr);
-	// 	goto error;
-	// }
-
-	bpf_ret = copy_from_user(&shadow_avail_idx,user.avail_idx,sizeof(u_int16_t));
-	if(bpf_ret<0)
-	{
-		printk("update the shadow_avail_idx error! addr is 0x%lx\n",user.avail_idx);
-		goto error;
-	}
-	// printk("cache avail_idx is %u\n",shadow_avail_idx);
-
-	// bpf_ret = copy_to_user(user.shadow_avail_idx, &shadow_avail_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vdev_isr error! addr is 0x%lx,\n",user.shadow_avail_idx);
-	// 	goto error;
-	// }
-	
-
-	// pa = offsetof(VRingUsed, ring[user.vring_num]);
-
-	// bpf_ret = copy_to_user(user.vring_used+pa, &shadow_avail_idx,sizeof(u_int16_t));
-	// if(bpf_ret<0)
-	// {
-	// 	printk("update the vdev_isr error! addr is 0x%lx,\n",user.vring_used+pa);
-	// 	goto error;
-	// }
-
-	// eventfd_write_ib(user.wfd);
-	return 0;
-error:
-	printk("update_qemu errorn");
-	return -1;
-}
-
 static void io_req_rw_complete(struct io_kiocb *req, bool *locked)
 {
-	// printk("IO uring Done!, user data is %lu, res is %d\n",req->cqe.user_data,req->cqe.res);
-	if(req->cqe.res>=0&&req->cqe.user_data!=0xFFFF)
-	{
-		// printk("io_complete_rw update index\n");
-		if(req->update_qemu==0&&req->io_bpf)
-		{
-			update_qemu(req);
-			req->io_bpf = 0;
-		}
-			
-		req->cqe.user_data =0xFFFF;
-	}
-	// printk("io_complete_rw update index\n");
-	// update_qemu_test(req);
 	io_req_io_end(req);
 	io_req_task_complete(req, locked);
 }
@@ -557,7 +315,7 @@ static void io_complete_rw_iopoll(struct kiocb *kiocb, long res)
 		}
 		req->cqe.res = res;
 	}
-	
+
 	/* order with io_iopoll_complete() checking ->iopoll_completed */
 	smp_store_release(&req->iopoll_completed, 1);
 }
@@ -567,8 +325,6 @@ static int kiocb_done(struct io_kiocb *req, ssize_t ret,
 {
 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
 	unsigned final_ret = io_fixup_rw_res(req, ret);
-	// printk("kiocb_done 1\n");
-	// printk("req->cqe.user_data is %d\n",req->cqe.user_data);
 
 	if (req->flags & REQ_F_CUR_POS)
 		req->file->f_pos = rw->kiocb.ki_pos;
@@ -578,21 +334,16 @@ static int kiocb_done(struct io_kiocb *req, ssize_t ret,
 			 * Safe to call io_end from here as we're inline
 			 * from the submission path.
 			 */
-			// printk("req->cqe.user_data 1 is %d\n",req->cqe.user_data);
-			// printk("kiocb_done 2\n");
 			io_req_io_end(req);
 			io_req_set_res(req, final_ret,
 				       io_put_kbuf(req, issue_flags));
 			return IOU_OK;
 		}
 	} else {
-		// printk("kiocb_done 3\n");
-		// printk("req->cqe.user_data 2 is %d\n",req->cqe.user_data);
 		io_rw_done(&rw->kiocb, ret);
 	}
 
 	if (req->flags & REQ_F_REISSUE) {
-		printk("req->flags REQ_F_REISSUE\n");
 		req->flags &= ~REQ_F_REISSUE;
 		if (io_resubmit_prep(req))
 			io_req_task_queue_reissue(req);
@@ -610,7 +361,6 @@ static struct iovec *__io_import_iovec(int ddir, struct io_kiocb *req,
 	struct iov_iter *iter = &s->iter;
 	u8 opcode = req->opcode;
 	struct iovec *iovec;
-	void *buf1;
 	void __user *buf;
 	size_t sqe_len;
 	ssize_t ret;
@@ -621,16 +371,10 @@ static struct iovec *__io_import_iovec(int ddir, struct io_kiocb *req,
 			return ERR_PTR(ret);
 		return NULL;
 	}
+
+	buf = u64_to_user_ptr(rw->addr);
 	sqe_len = rw->len;
-	// printk("__io_import_iovec rw len is %u\n",rw->len);
-	// printk("__io_import_iovec is ok 1\n");
-	if(req->io_bpf==1)
-		 goto kernel;
-	// printk("__io_import_iovec is ok 2\n");
-	buf	 = u64_to_user_ptr(rw->addr);
-	
-	
-	
+
 	if (opcode == IORING_OP_READ || opcode == IORING_OP_WRITE ||
 	    (req->flags & REQ_F_BUFFER_SELECT)) {
 		if (io_do_buffer_select(req)) {
@@ -649,35 +393,6 @@ static struct iovec *__io_import_iovec(int ddir, struct io_kiocb *req,
 
 	iovec = s->fast_iov;
 	ret = __import_iovec(ddir, buf, sqe_len, UIO_FASTIOV, &iovec, iter,
-			      req->ctx->compat);
-	if (unlikely(ret < 0))
-		return ERR_PTR(ret);
-	return iovec;
-
-	kernel:
-		// printk("__io_import_iovec is ok 3\n");
-		buf1 = (void *)(u_int64_t)rw->addr;
-		
-		if (opcode == IORING_OP_READ || opcode == IORING_OP_WRITE ||
-	    (req->flags & REQ_F_BUFFER_SELECT)) {
-		if (io_do_buffer_select(req)) {
-			// printk("__io_import_iovec is ok 4\n");
-			buf1 = io_buffer_select(req, &sqe_len, issue_flags);
-			if (!buf1)
-				return ERR_PTR(-ENOBUFS);
-			rw->addr = (unsigned long) buf1;
-			rw->len = sqe_len;
-		}
-		// printk("__io_import_iovec is ok 5\n");
-		ret = import_single_range_bpf(ddir, buf1, sqe_len, s->fast_iov, iter);
-		if (ret)
-			return ERR_PTR(ret);
-		return NULL;
-	}
-	// printk("__import_iovec_bpf num is %u\n",sqe_len);
-	
-	iovec = s->fast_iov;
-	ret = __import_iovec_bpf(ddir, buf1, sqe_len, UIO_FASTIOV, &iovec, iter,
 			      req->ctx->compat);
 	if (unlikely(ret < 0))
 		return ERR_PTR(ret);
@@ -917,7 +632,7 @@ static bool io_rw_should_retry(struct io_kiocb *req)
 static inline int io_iter_do_read(struct io_rw *rw, struct iov_iter *iter)
 {
 	struct file *file = rw->kiocb.ki_filp;
-	// printk("io_iter_do_read \n");
+
 	if (likely(file->f_op->read_iter))
 		return call_read_iter(file, &rw->kiocb, iter);
 	else if (file->f_op->read)
@@ -945,7 +660,7 @@ static int io_rw_init_file(struct io_kiocb *req, fmode_t mode)
 
 	if (!io_req_ffs_set(req))
 		req->flags |= io_file_get_flags(file) << REQ_F_SUPPORT_NOWAIT_BIT;
-	// printk("io_rw_init_file is %d,req is %lx\n",req->cqe.user_data,req);
+
 	kiocb->ki_flags = file->f_iocb_flags;
 	ret = kiocb_set_rw_flags(kiocb, rw->flags);
 	if (unlikely(ret))
@@ -988,14 +703,11 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 	ssize_t ret, ret2;
 	loff_t *ppos;
 
-	// printk("io_read 1\n");
 	if (!req_has_async_data(req)) {
-		// printk("io_read 2\n");
 		ret = io_import_iovec(READ, req, &iovec, s, issue_flags);
 		if (unlikely(ret < 0))
 			return ret;
 	} else {
-		// printk("io_read 3\n");
 		io = req->async_data;
 		s = &io->s;
 
@@ -1020,13 +732,10 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 	ret = io_rw_init_file(req, FMODE_READ);
 	if (unlikely(ret)) {
 		kfree(iovec);
-		// printk("io_read 3-1\n");
 		return ret;
 	}
 	req->cqe.res = iov_iter_count(&s->iter);
 
-
-	// printk("io_read 3 -3\n");
 	if (force_nonblock) {
 		/* If the file doesn't support async, just async punt */
 		if (unlikely(!io_file_supports_nowait(req))) {
@@ -1043,39 +752,12 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 
 	ret = rw_verify_area(READ, req->file, ppos, req->cqe.res);
 	if (unlikely(ret)) {
-		printk("io_read 4,fail,ppos is %lu\n",*ppos);
 		kfree(iovec);
 		return ret;
 	}
-	// printk("here is ok, ret is %d\n",ret);
-	// printk("io_read insert \n");
-	
+
 	ret = io_iter_do_read(rw, &s->iter);
-	
-	// printk("io_iter_do_read, ret is %d\n",ret);
-	// if(req->cqe.user_data!=0xFFFF&&ret>=0)
-	// {
-		
-	// 	printk("io_read update \n");
-		
-	// 	/*update the qemu*/
-	// 	update_qemu(req);
-	// 	req->cqe.user_data=0xFFFF;
-	// }
-	if(req->cqe.user_data!=0xFFFF&&ret>=0)
-	{
-		
-		printk("io_read update \n");
-		if(req->update_qemu==0&&req->io_bpf)
-		{
-			update_qemu(req);
-			req->io_bpf = 0;
-			req->cqe.user_data=0xFFFF;
-		}
-		/*update the qemu*/
-		
-	}
-	
+
 	if (ret == -EAGAIN || (req->flags & REQ_F_REISSUE)) {
 		req->flags &= ~REQ_F_REISSUE;
 		/* if we can poll, just do that */
@@ -1111,7 +793,7 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 		ret = ret > 0 ? ret : ret2;
 		goto done;
 	}
-	
+
 	io = req->async_data;
 	s = &io->s;
 	/*
@@ -1125,7 +807,6 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 		 * above or inside this loop. Advance the iter by the bytes
 		 * that were consumed.
 		 */
-
 		iov_iter_advance(&s->iter, ret);
 		if (!iov_iter_count(&s->iter))
 			break;
@@ -1156,9 +837,6 @@ done:
 	/* it's faster to check here then delegate to kfree */
 	if (iovec)
 		kfree(iovec);
-	// printk("req kiocb_done\n");
-	// printk("****************\n");
-	// printk("io_read done,ret is %d\n",ret);
 	return kiocb_done(req, ret, issue_flags);
 }
 
@@ -1171,6 +849,7 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 	bool force_nonblock = issue_flags & IO_URING_F_NONBLOCK;
 	ssize_t ret, ret2;
 	loff_t *ppos;
+
 	if (!req_has_async_data(req)) {
 		ret = io_import_iovec(WRITE, req, &iovec, s, issue_flags);
 		if (unlikely(ret < 0))
@@ -1227,7 +906,7 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 					SB_FREEZE_WRITE);
 	}
 	kiocb->ki_flags |= IOCB_WRITE;
-	// printk("io_iter_do_write \n");
+
 	if (likely(req->file->f_op->write_iter))
 		ret2 = call_write_iter(req->file, kiocb, &s->iter);
 	else if (req->file->f_op->write)
@@ -1240,58 +919,23 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 		ret2 = -EAGAIN;
 	}
 
-	// if(req->cqe.user_data!=0xFFFF&&ret2>=0)
-	// {
-	// 	printk("io_write update\n");
-	// 	/*update the qemu*/
-		
-	// 	update_qemu(req);
-	// 	req->cqe.user_data=0xFFFF;
-	// }
-	
-	if(req->cqe.user_data!=0xFFFF&&ret2>=0)
-	{
-		// printk("io_write update\n");
-		/*update the qemu*/
-		
-		if(req->update_qemu==0&&req->io_bpf)
-		{
-			update_qemu(req);
-			req->io_bpf = 0;
-			req->cqe.user_data=0xFFFF;
-		}
-	}
-	
-
 	/*
 	 * Raw bdev writes will return -EOPNOTSUPP for IOCB_NOWAIT. Just
 	 * retry them without IOCB_NOWAIT.
 	 */
 	if (ret2 == -EOPNOTSUPP && (kiocb->ki_flags & IOCB_NOWAIT))
-	{
-
 		ret2 = -EAGAIN;
-	}
-		
 	/* no retry on NONBLOCK nor RWF_NOWAIT */
 	if (ret2 == -EAGAIN && (req->flags & REQ_F_NOWAIT))
-	{
-		printk("io_write 2,ret2 is %d\n",ret2);
 		goto done;
-	}
-		
 	if (!force_nonblock || ret2 != -EAGAIN) {
 		/* IOPOLL retry should happen for io-wq threads */
 		if (ret2 == -EAGAIN && (req->ctx->flags & IORING_SETUP_IOPOLL))
-		{
-			printk("io_write 3,ret2 is %d\n",ret2);
 			goto copy_iov;
-		}
-			
 
 		if (ret2 != req->cqe.res && ret2 >= 0 && need_complete_io(req)) {
 			struct io_async_rw *io;
-			printk("io_write 4,ret2 is %d\n",ret2);
+
 			trace_io_uring_short_write(req->ctx, kiocb->ki_pos - ret2,
 						req->cqe.res, ret2);
 
@@ -1312,16 +956,11 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
 			return ret ? ret : -EAGAIN;
 		}
 done:
-		
 		ret = kiocb_done(req, ret2, issue_flags);
-		//  printk("io_write kiocb_done\n");
 	} else {
 copy_iov:
-		
 		iov_iter_restore(&s->iter, &s->iter_state);
 		ret = io_setup_async_rw(req, iovec, s, false);
-		// printk("write again xxxxxx\n");
-		//  printk("-------------------\n");
 		if (!ret) {
 			if (kiocb->ki_flags & IOCB_WRITE)
 				kiocb_end_write(req);
@@ -1385,7 +1024,7 @@ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
 								poll_flags);
 		} else {
 			struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
-			printk("io_do_iopoll id is %u\n",req->cqe.user_data);
+
 			ret = file->f_op->iopoll(&rw->kiocb, &iob, poll_flags);
 		}
 		if (unlikely(ret < 0))

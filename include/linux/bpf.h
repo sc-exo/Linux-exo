@@ -686,7 +686,6 @@ struct bpf_insn_access_aux {
 			u32 btf_id;
 		};
 	};
-	int mem_size; /* for PTR_TO_MEM */
 	struct bpf_verifier_log *log; /* for verbose logs */
 };
 
@@ -1416,7 +1415,7 @@ struct bpf_array {
 	};
 };
 
-#define BPF_COMPLEXITY_LIMIT_INSNS      100000000 /* yes. 1M insns */
+#define BPF_COMPLEXITY_LIMIT_INSNS      1000000 /* yes. 1M insns */
 #define MAX_TAIL_CALL_CNT 33
 
 /* Maximum number of loops for bpf_loop */
@@ -1709,10 +1708,7 @@ extern const struct file_operations bpf_iter_fops;
 extern const struct bpf_prog_ops bpf_offload_prog_ops;
 extern const struct bpf_verifier_ops tc_cls_act_analyzer_ops;
 extern const struct bpf_verifier_ops xdp_analyzer_ops;
-int bpf_obj_get_ib(const char *pathname);
-int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
-			      __u64 flags);
-u32 bpf_map_value_size(const struct bpf_map *map);
+
 struct bpf_prog *bpf_prog_get(u32 ufd);
 struct bpf_prog *bpf_prog_get_type_dev(u32 ufd, enum bpf_prog_type type,
 				       bool attach_drv);
@@ -1828,7 +1824,7 @@ struct bpf_link *bpf_link_get_curr_or_next(u32 *id);
 
 int bpf_obj_pin_user(u32 ufd, const char __user *pathname);
 int bpf_obj_get_user(const char __user *pathname, int flags);
-int bpf_obj_get_user_ib(const char __user *pathname, int flags);
+
 #define BPF_ITER_FUNC_PREFIX "bpf_iter_"
 #define DEFINE_BPF_ITER_FUNC(target, args...)			\
 	extern int bpf_iter_ ## target(args);			\
@@ -1943,8 +1939,6 @@ int bpf_stackmap_copy(struct bpf_map *map, void *key, void *value);
 
 int bpf_fd_array_map_update_elem(struct bpf_map *map, struct file *map_file,
 				 void *key, void *value, u64 map_flags);
-int array_map_update_elem_evo(struct bpf_map *map, void *key, void *value,
-				 u64 map_flags);
 int bpf_fd_array_map_lookup_elem(struct bpf_map *map, void *key, u32 *value);
 int bpf_fd_htab_map_update_elem(struct bpf_map *map, struct file *map_file,
 				void *key, void *value, u64 map_flags);
@@ -2502,6 +2496,7 @@ extern const struct bpf_func_proto bpf_map_push_elem_proto;
 extern const struct bpf_func_proto bpf_map_pop_elem_proto;
 extern const struct bpf_func_proto bpf_map_peek_elem_proto;
 extern const struct bpf_func_proto bpf_map_lookup_percpu_elem_proto;
+
 extern const struct bpf_func_proto bpf_get_prandom_u32_proto;
 extern const struct bpf_func_proto bpf_get_smp_processor_id_proto;
 extern const struct bpf_func_proto bpf_get_numa_node_id_proto;
@@ -2572,6 +2567,7 @@ extern const struct bpf_func_proto bpf_copy_from_user_task_proto;
 extern const struct bpf_func_proto bpf_set_retval_proto;
 extern const struct bpf_func_proto bpf_get_retval_proto;
 extern const struct bpf_func_proto bpf_user_ringbuf_drain_proto;
+
 const struct bpf_func_proto *tracing_prog_func_proto(
   enum bpf_func_id func_id, const struct bpf_prog *prog);
 

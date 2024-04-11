@@ -609,11 +609,20 @@ void fuse_read_args_fill(struct fuse_io_args *ia, struct file *file, loff_t pos,
 {
 	struct fuse_file *ff = file->private_data;
 	struct fuse_args *args = &ia->ap.args;
-
+	struct fuse_io_priv *io  = ia->io;
 	ia->read.in.fh = ff->fh;
 	ia->read.in.offset = pos;
 	ia->read.in.size = count;
 	ia->read.in.flags = file->f_flags;
+
+	if(opcode == FUSE_BPF_LOAD)
+	{
+		if(io->ib_enable)
+			{
+				ia->read.in.bpf_ino = io->bpf_ino;
+				args->bpf_ino = io->bpf_ino;
+			}
+	}
 	args->opcode = opcode;
 	args->nodeid = ff->nodeid;
 	args->in_numargs = 1;
@@ -782,8 +791,15 @@ static ssize_t fuse_send_read(struct fuse_io_args *ia, loff_t pos, size_t count,
 	struct file *file = ia->io->iocb->ki_filp;
 	struct fuse_file *ff = file->private_data;
 	struct fuse_mount *fm = ff->fm;
-
-	fuse_read_args_fill(ia, file, pos, count, FUSE_READ);
+	struct fuse_io_priv *io = ia->io;
+	if(io->ib_enable)
+	{
+		fuse_read_args_fill(ia, file, pos, count, FUSE_BPF_LOAD);
+	}
+	else
+	{
+		fuse_read_args_fill(ia, file, pos, count, FUSE_READ);
+	}
 	if (owner != NULL) {
 		ia->read.in.read_flags |= FUSE_READ_LOCKOWNER;
 		ia->read.in.lock_owner = fuse_lock_owner_id(fm->fc, owner);
@@ -2869,6 +2885,8 @@ fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 		return -ENOMEM;
 	spin_lock_init(&io->lock);
 	kref_init(&io->refcnt);
+	io->ib_enable = iocb->ib_enable;
+	io->bpf_ino = iocb->bpf_ino;
 	io->reqs = 1;
 	io->bytes = -1;
 	io->size = 0;

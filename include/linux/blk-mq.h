@@ -7,7 +7,7 @@
 #include <linux/lockdep.h>
 #include <linux/scatterlist.h>
 #include <linux/prefetch.h>
-#include <linux/nvme.h>
+
 struct blk_mq_tags;
 struct blk_flush_queue;
 
@@ -81,6 +81,10 @@ enum mq_rq_state {
  * especially blk_mq_rq_ctx_init() to take care of the added fields.
  */
 struct request {
+	unsigned int 	ib_enable;
+	struct ib_extent_status ib_es[15];
+	unsigned int 	ib_es_num;
+	struct inode *inode;
 	struct request_queue *q;
 	struct blk_mq_ctx *mq_ctx;
 	struct blk_mq_hw_ctx *mq_hctx;
@@ -195,7 +199,7 @@ struct request {
 		struct __call_single_data csd;
 		u64 fifo_time;
 	};
-	struct nvme_command *xrp_command;
+
 	/*
 	 * completion callback.
 	 */

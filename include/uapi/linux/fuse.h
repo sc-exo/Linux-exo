@@ -541,6 +541,7 @@ enum fuse_opcode {
 	FUSE_REMOVEMAPPING	= 49,
 	FUSE_SYNCFS		= 50,
 	FUSE_TMPFILE		= 51,
+	FUSE_BPF_LOAD       = 52,
 
 	/* CUSE specific operations */
 	CUSE_INIT		= 4096,

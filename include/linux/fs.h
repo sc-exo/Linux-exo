@@ -341,6 +341,8 @@ enum rw_hint {
 struct kiocb {
 	struct file		*ki_filp;
 	loff_t			ki_pos;
+	unsigned int	ib_enable;
+	unsigned long int	bpf_ino;
 	void (*ki_complete)(struct kiocb *iocb, long ret);
 	void			*private;
 	int			ki_flags;
@@ -585,11 +587,11 @@ is_uncached_acl(struct posix_acl *acl)
 
 struct fsnotify_mark_connector;
 
-#define XRP_MAX_LEN	0xffffffff
-#define XRP_BLOCK_SHIFT	12
-#define XRP_BLOCK_SIZE	(1 << XRP_BLOCK_SHIFT)
-
-
+/*
+ * Keep mostly read-only and often accessed (especially for
+ * the RCU path lookup and 'stat' data) fields at the beginning
+ * of the 'struct inode'
+ */
 typedef unsigned long meta__t;
 typedef unsigned long key__t;
 typedef unsigned char val__t[64];
@@ -609,42 +611,24 @@ struct ScatterGatherQuery {
     struct MaybeValue values[32];
 };
 
-struct xrp_tree {
-	struct rb_root   rb_root;
-	__u64 version;
-	struct xrp_extent *cache_es;
-};
 
-struct xrp_extent {
-	struct rb_node rb_node;
-	__u32 lblk;
-	__u32 len;
-	__u64 pblk;
-	__u64 version;
+struct inode_extent_status {
+	__u32 es_lblk;	/* first logical block extent covers */
+	__u32 es_len;	/* length of extent in block */
+	__u64 es_pblk;	/* first physical block */
 };
-
-struct xrp_mapping {
-	bool exist;
-	loff_t offset;  /* file offset */
-	__u64 len;
-	__u64 address;  /* disk address */
-	__u64 version;
-};
-/*
- * Keep mostly read-only and often accessed (especially for
- * the RCU path lookup and 'stat' data) fields at the beginning
- * of the 'struct inode'
- */
 struct inode {
-	unsigned int ib_enable;
-	struct xrp_tree i_es_tree;
-	spinlock_t		xrp_extent_lock;
 	umode_t			i_mode;
 	unsigned short		i_opflags;
 	kuid_t			i_uid;
 	kgid_t			i_gid;
 	unsigned int		i_flags;
+	unsigned int 	ib_enable;
+	bool 	ib_es_first;
+	struct inode_extent_status ib_es[15];
+	struct MaybeValue query;
 
+	unsigned int 	ib_es_num;
 #ifdef CONFIG_FS_POSIX_ACL
 	struct posix_acl	*i_acl;
 	struct posix_acl	*i_default_acl;
@@ -749,21 +733,6 @@ struct inode {
 
 	void			*i_private; /* fs or device private pointer */
 } __randomize_layout;
-
-struct ib_mesg {
-	__u8 status;
-	struct MaybeValue query;
-};
-
-struct host_extent_status {
-	__u32 es_lblk;	/* first logical block extent covers */
-	__u32 es_len;	/* length of extent in block */
-	__u64 es_pblk;	/* first physical block */
-};
-void xrp_sync_ext4_extent(struct inode *inode, struct host_extent_status *newes);
-void xrp_print_tree(struct inode *inode);
-void xrp_clear_tree(struct inode *inode);
-void xrp_retrieve_mapping(struct inode *inode, loff_t offset, loff_t len, struct xrp_mapping *mapping);
 
 struct timespec64 timestamp_truncate(struct timespec64 t, struct inode *inode);
 

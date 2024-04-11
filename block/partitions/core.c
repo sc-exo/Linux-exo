@@ -346,7 +346,7 @@ static struct block_device *add_partition(struct gendisk *disk, int partno,
 	bdev = bdev_alloc(disk, partno);
 	if (!bdev)
 		goto out_put_disk;
-	bdev->ib_enalbe =0;
+
 	bdev->bd_start_sect = start;
 	bdev_set_nr_sectors(bdev, len);
 

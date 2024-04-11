@@ -251,7 +251,7 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 	int nr_pages, ret = 0;
 	size_t copied = 0;
 	size_t orig_count;
-
+	unsigned int i ;
 	if ((pos | length) & ((1 << blkbits) - 1) ||
 	    !bdev_iter_is_aligned(iomap->bdev, dio->submit.iter))
 		return -EINVAL;
@@ -358,6 +358,20 @@ static loff_t iomap_dio_bio_iter(const struct iomap_iter *iter,
 		 */
 		if (nr_pages)
 			dio->iocb->ki_flags &= ~IOCB_HIPRI;
+		if(inode->ib_enable)
+		{
+			bio->inode = inode;
+			bio->ib_enable = 1;
+			bio->ib_es_num = inode->ib_es_num;
+			// for(i =0; i< bio->ib_es_num; i++)
+			// {
+			// 	bio->ib_es[i].es_lblk = inode->ib_es[i].es_lblk;
+			// 	bio->ib_es[i].es_len = inode->ib_es[i].es_len;
+			// 	bio->ib_es[i].es_pblk = inode->ib_es[i].es_pblk;
+			// }
+			// inode->ib_es_num = 0;
+		}
+		
 		iomap_dio_submit_bio(iter, dio, bio, pos);
 		pos += n;
 	} while (nr_pages);

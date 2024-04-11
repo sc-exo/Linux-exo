@@ -773,6 +773,6 @@ const struct bpf_func_proto bpf_loop_proto = {
 	.ret_type	= RET_INTEGER,
 	.arg1_type	= ARG_ANYTHING,
 	.arg2_type	= ARG_PTR_TO_FUNC,
-	.arg3_type	= ARG_ANYTHING,
+	.arg3_type	= ARG_PTR_TO_STACK_OR_NULL,
 	.arg4_type	= ARG_ANYTHING,
 };

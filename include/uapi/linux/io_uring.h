@@ -165,8 +165,6 @@ enum {
  */
 #define IORING_SETUP_DEFER_TASKRUN	(1U << 13)
 
-#define IORING_SETUP_NO_MMAP		(1U << 14)
-
 enum io_uring_op {
 	IORING_OP_NOP,
 	IORING_OP_READV,
@@ -217,7 +215,7 @@ enum io_uring_op {
 	IORING_OP_URING_CMD,
 	IORING_OP_SEND_ZC,
 	IORING_OP_SENDMSG_ZC,
-	IORING_OP_BPF,
+
 	/* this goes last, obviously */
 	IORING_OP_LAST,
 };
@@ -376,7 +374,7 @@ struct io_sqring_offsets {
 	__u32 dropped;
 	__u32 array;
 	__u32 resv1;
-	__u64 user_addr;
+	__u64 resv2;
 };
 
 /*
@@ -395,7 +393,7 @@ struct io_cqring_offsets {
 	__u32 cqes;
 	__u32 flags;
 	__u32 resv1;
-	__u64 user_addr;
+	__u64 resv2;
 };
 
 /*
@@ -428,10 +426,6 @@ struct io_uring_params {
 	__u32 resv[3];
 	struct io_sqring_offsets sq_off;
 	struct io_cqring_offsets cq_off;
-	int map_fd;
-	int map_d_fd;
-	int router_fd;
-	int qemurouter_fd;
 };
 
 /*
@@ -495,16 +489,7 @@ enum {
 
 	/* register a range of fixed file slots for automatic slot allocation */
 	IORING_REGISTER_FILE_ALLOC_RANGE	= 25,
-	IORING_REGISTER_BPF			= 26,
-	IORING_UNREGISTER_BPF			= 27,
-	IORING_REGISTER_BPF_vqaddr		= 28,
-	IORING_REGISTER_BPF_vqfd        = 29,
-	IORING_REGISTER_BPF_L1Cache     = 30,
-	IORING_REGISTER_BPF_L2Cache			= 31,
-	IORING_REGISTER_BPF_L2Ref			= 32,
-	IORING_REGISTER_KVM_Router      = 33,
-	IORING_UNREGISTER_KVM_Router      = 34,
-	IORING_REGISTER_vqid      = 35,
+
 	/* this goes last */
 	IORING_REGISTER_LAST
 };

@@ -398,5 +398,5 @@ int snic_get_state(struct snic *);
 const char *snic_state_to_str(unsigned int);
 void snic_hex_dump(char *, char *, int);
 void snic_print_desc(const char *fn, char *os_buf, int len);
-// const char *show_opcode_name(int val);
+const char *show_opcode_name(int val);
 #endif /* _SNIC_H */

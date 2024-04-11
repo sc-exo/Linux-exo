@@ -164,6 +164,7 @@ static void *array_map_lookup_elem(struct bpf_map *map, void *key)
 {
 	struct bpf_array *array = container_of(map, struct bpf_array, map);
 	u32 index = *(u32 *)key;
+
 	if (unlikely(index >= array->map.max_entries))
 		return NULL;
 
@@ -238,6 +239,7 @@ static void *percpu_array_map_lookup_elem(struct bpf_map *map, void *key)
 {
 	struct bpf_array *array = container_of(map, struct bpf_array, map);
 	u32 index = *(u32 *)key;
+
 	if (unlikely(index >= array->map.max_entries))
 		return NULL;
 
@@ -351,46 +353,6 @@ static int array_map_update_elem(struct bpf_map *map, void *key, void *value,
 	}
 	return 0;
 }
-
-int array_map_update_elem_evo(struct bpf_map *map, void *key, void *value,
-				 u64 map_flags)
-{
-	struct bpf_array *array = container_of(map, struct bpf_array, map);
-	u32 index = *(u32 *)key;
-	char *val;
-
-	if (unlikely((map_flags & ~BPF_F_LOCK) > BPF_EXIST))
-		/* unknown flags */
-		return -EINVAL;
-
-	if (unlikely(index >= array->map.max_entries))
-		/* all elements were pre-allocated, cannot insert a new one */
-		return -E2BIG;
-
-	if (unlikely(map_flags & BPF_NOEXIST))
-		/* all elements already exist */
-		return -EEXIST;
-
-	if (unlikely((map_flags & BPF_F_LOCK) &&
-		     !map_value_has_spin_lock(map)))
-		return -EINVAL;
-
-	if (array->map.map_type == BPF_MAP_TYPE_PERCPU_ARRAY) {
-		val = this_cpu_ptr(array->pptrs[index & array->index_mask]);
-		copy_map_value(map, val, value);
-		check_and_free_fields(array, val);
-	} else {
-		val = array->value +
-			(u64)array->elem_size * (index & array->index_mask);
-		if (map_flags & BPF_F_LOCK)
-			copy_map_value_locked(map, val, value, false);
-		else
-			copy_map_value(map, val, value);
-		check_and_free_fields(array, val);
-	}
-	return 0;
-}
-EXPORT_SYMBOL_GPL(array_map_update_elem_evo);
 
 int bpf_percpu_array_update(struct bpf_map *map, void *key, void *value,
 			    u64 map_flags)

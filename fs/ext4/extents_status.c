@@ -16,9 +16,7 @@
 #include "ext4.h"
 
 #include <trace/events/ext4.h>
-#include <linux/virtio_blk.h>
-#include <linux/fs.h>
-#include <linux/rwlock.h>
+
 /*
  * According to previous discussion in Ext4 Developer Workshop, we
  * will introduce a new structure called io tree to track all extent
@@ -145,333 +143,6 @@
 
 static struct kmem_cache *ext4_es_cachep;
 static struct kmem_cache *ext4_pending_cachep;
-struct xrp_extent *xrp_do_search_extent(struct rb_root *root, __u32 lblk)
-{
-	/* return the left-most extent that *might* overlap with the input extent,
-	 * assuming the extents in the tree do not overlap
-	 */
-	struct rb_node *node = root->rb_node;
-	struct xrp_extent *i_extent = NULL;
-
-	while (node) {
-		i_extent = rb_entry(node, struct xrp_extent, rb_node);
-		if (lblk < i_extent->lblk)
-			node = node->rb_left;
-		else if (lblk > i_extent->lblk + i_extent->len - 1)
-			node = node->rb_right;
-		else
-			return i_extent;
-	}
-
-	if (i_extent && lblk < i_extent->lblk)
-		return i_extent;
-
-	if (i_extent && lblk > i_extent->lblk + i_extent->len - 1) {
-		node = rb_next(&i_extent->rb_node);
-		return node ? rb_entry(node, struct xrp_extent, rb_node) :
-			      NULL;
-	}
-
-	return NULL;
-}
-
-bool xrp_extent_can_merge(struct xrp_extent *i_extent_left,
-                          struct xrp_extent *i_extent_right)
-{
-	if (((__u64) i_extent_left->len) + i_extent_right->len > XRP_MAX_LEN) {
-		pr_warn("xrp assertion failed when merging extents. "
-			"The sum of lengths of i_extent_left (%d) and i_extent_right (%d) "
-			"is bigger than allowed file size (%d)\n",
-			i_extent_left->len, i_extent_right->len, XRP_MAX_LEN);
-		WARN_ON(1);
-		return false;
-	}
-
-	if (((__u64) i_extent_left->lblk) + i_extent_left->len != i_extent_right->lblk)
-		return false;
-
-	if (i_extent_left->pblk + i_extent_left->len != i_extent_right->pblk)
-		return false;
-
-	return true;
-}
-
-void xrp_do_try_merge_left(struct rb_root *root,
-                           struct xrp_extent *i_extent)
-{
-	struct rb_node *node;
-	struct xrp_extent *left_i_extent;
-
-	node = rb_prev(&i_extent->rb_node);
-	if (!node)
-		return;
-
-	left_i_extent = rb_entry(node, struct xrp_extent, rb_node);
-	if (xrp_extent_can_merge(left_i_extent, i_extent)) {
-		left_i_extent->len += i_extent->len;
-		rb_erase(&i_extent->rb_node, root);
-		kfree(i_extent);
-	}
-}
-
-void xrp_do_try_merge_right(struct rb_root *root,
-                            struct xrp_extent *i_extent)
-{
-	struct rb_node *node;
-	struct xrp_extent *right_i_extent;
-
-	node = rb_next(&i_extent->rb_node);
-	if (!node)
-		return;
-
-	right_i_extent = rb_entry(node, struct xrp_extent, rb_node);
-	if (xrp_extent_can_merge(i_extent, right_i_extent)) {
-		i_extent->len += right_i_extent->len;
-		rb_erase(node, root);
-		kfree(right_i_extent);
-	}
-}
-
-int xrp_do_insert_extent(struct rb_root *root,
-                         struct xrp_extent *new_i_extent)
-{
-	/* assumption: new_i_extent does not overlap with any extent in the tree */
-	struct rb_node **p = &root->rb_node;
-	struct rb_node *parent = NULL;
-	struct xrp_extent *i_extent = NULL;
-	int ret = 0;
-	
-	while (*p) {
-		parent = *p;
-		i_extent = rb_entry(parent, struct xrp_extent, rb_node);
-		if (new_i_extent->lblk < i_extent->lblk) {
-			if (xrp_extent_can_merge(new_i_extent, i_extent)) {
-				i_extent->lblk = new_i_extent->lblk;
-				i_extent->len += new_i_extent->len;
-				i_extent->pblk = new_i_extent->pblk;
-				xrp_do_try_merge_left(root, i_extent);
-				goto out;
-			}
-			p = &((*p)->rb_left);
-		} else if (new_i_extent->lblk > i_extent->lblk + i_extent->len - 1) {
-			if (xrp_extent_can_merge(i_extent, new_i_extent)) {
-				i_extent->len += new_i_extent->len;
-				xrp_do_try_merge_right(root, i_extent);
-				goto out;
-			}
-			p = &((*p)->rb_right);
-		} else {
-			BUG();
-			ret = -EINVAL;
-			goto out;
-		}
-	}
-
-	i_extent = kmalloc(sizeof(struct xrp_extent), GFP_NOIO);
-	if (!i_extent) {
-		printk("xrp: failed to allocate xrp_extent in xrp_do_insert_extent\n");
-		ret = -ENOMEM;
-		goto out;
-	}
-	i_extent->lblk = new_i_extent->lblk;
-	i_extent->len = new_i_extent->len;
-	i_extent->pblk = new_i_extent->pblk;
-	i_extent->version = 0;
-	rb_link_node(&i_extent->rb_node, parent, p);
-	rb_insert_color(&i_extent->rb_node, root);
-
-out:
-	return ret;
-}
-
-int xrp_do_remove_extent(struct rb_root *root, __u32 lblk, __u32 len)
-{
-	struct xrp_extent *i_extent;
-	int ret = 0;
-
-	while (true) {
-		i_extent = xrp_do_search_extent(root, lblk);
-		if (!i_extent || i_extent->lblk > lblk + len - 1)
-			break;
-
-		if (i_extent->lblk < lblk && i_extent->lblk + i_extent->len - 1 <= lblk + len - 1) {
-			i_extent->len = lblk - i_extent->lblk;
-		} else if (i_extent->lblk + i_extent->len - 1 > lblk + len - 1 && i_extent->lblk >= lblk) {
-			struct xrp_extent ori_i_extent;
-			ori_i_extent.lblk = i_extent->lblk;
-			ori_i_extent.len = i_extent->len;
-			ori_i_extent.pblk = i_extent->pblk;
-
-			i_extent->lblk = lblk + len;
-			i_extent->len = ori_i_extent.lblk + ori_i_extent.len - lblk - len;
-			i_extent->pblk = ori_i_extent.pblk + (lblk + len - ori_i_extent.lblk);
-		} else if (i_extent->lblk < lblk && i_extent->lblk + i_extent->len - 1 > lblk + len - 1) {
-			__u32 ori_len = i_extent->len;
-			struct xrp_extent new_i_extent;
-			new_i_extent.lblk = lblk + len;
-			new_i_extent.len = i_extent->lblk + i_extent->len - lblk - len;
-			new_i_extent.pblk = i_extent->pblk + (lblk + len - i_extent->lblk);
-
-			i_extent->len = lblk - i_extent->lblk;
-			ret = xrp_do_insert_extent(root, &new_i_extent);
-			if (ret) {
-				printk("xrp: failed to insert extent in xrp_do_remove_extent\n");
-				i_extent->len = ori_len;
-				goto out;
-			}
-		} else {
-			rb_erase(&i_extent->rb_node, root);
-			kfree(i_extent);
-		}
-	}
-
-out:
-	return ret;
-}
-
-void xrp_set_version(struct rb_root *new_root, struct rb_root *old_root, __u64 new_version)
-{
-	struct rb_node *new_tree_node = NULL;
-	struct rb_node *old_tree_node = NULL;
-
-	struct xrp_extent *new_tree_i_extent;
-	struct xrp_extent *old_tree_i_extent;
-	struct xrp_extent *parent_i_extent;
-
-	if (new_root != NULL)
-		new_tree_node = rb_first(new_root);
-	if (old_root != NULL)
-		old_tree_node = rb_first(old_root);
-
-	while (new_tree_node) {
-		new_tree_i_extent = rb_entry(new_tree_node, struct xrp_extent, rb_node);
-		parent_i_extent = NULL;
-		while (old_tree_node) {
-			old_tree_i_extent = rb_entry(old_tree_node, struct xrp_extent, rb_node);
-			if (old_tree_i_extent->lblk + old_tree_i_extent->len <= new_tree_i_extent->lblk) {
-				old_tree_node = rb_next(old_tree_node);
-				continue;
-			}
-			if ((old_tree_i_extent->lblk <= new_tree_i_extent->lblk)
-			    && (old_tree_i_extent->lblk + old_tree_i_extent->len
-			        >= new_tree_i_extent->lblk + new_tree_i_extent->len)
-			    && (new_tree_i_extent->pblk
-			        == old_tree_i_extent->pblk
-			           + (new_tree_i_extent->lblk - old_tree_i_extent->lblk))) {
-				parent_i_extent = old_tree_i_extent;
-			}
-			break;
-		}
-		if (parent_i_extent)
-			new_tree_i_extent->version = parent_i_extent->version;
-		else
-			new_tree_i_extent->version = new_version;
-		new_tree_node = rb_next(new_tree_node);
-	}
-}
-
-void xrp_do_clear_tree(struct rb_root *root)
-{
-	struct rb_node *node;
-	struct xrp_extent *i_extent;
-
-	node = rb_first(root);
-	while (node) {
-		i_extent = rb_entry(node, struct xrp_extent, rb_node);
-		node = rb_next(node);
-		rb_erase(&i_extent->rb_node, root);
-		kfree(i_extent);
-	}
-}
-
-
-
-void xrp_sync_ext4_extent(struct inode *inode, struct host_extent_status *newes)
-{
-	int ret;
-
-	struct xrp_extent i_extent;
-	i_extent.lblk = newes->es_lblk;
-	i_extent.len = newes->es_len;
-	i_extent.pblk = newes->es_pblk;
-	// printk("**************************\n");
-	// xrp_print_tree(inode);
-	// printk("xrp_sync_ext4_extent:The es:lblk: %lu; len: %lu; pblk: %llu\n",i_extent.lblk,i_extent.len,i_extent.pblk);
-
-	ret = xrp_do_insert_extent(&inode->i_es_tree.rb_root, &i_extent);
-	if (ret) {
-		printk("xrp: failed to insert extent\n");
-	}
-	// xrp_print_tree(inode);
-	// printk("**************************\n");
-}
-
-void xrp_print_tree(struct inode *inode)
-{
-	struct rb_root *root;
-	struct rb_node *node;
-	unsigned long num_extents = 0;
-
-
-	root = &inode->i_es_tree.rb_root;
-	if (!root)
-		goto out;
-	node = rb_first(root);
-	while (node) {
-		struct xrp_extent *i_extent;
-		i_extent = rb_entry(node, struct xrp_extent, rb_node);
-		printk("  [%u, %u): %llu\n",
-		       i_extent->lblk, i_extent->lblk + i_extent->len,
-		       i_extent->pblk);
-		++num_extents;
-		node = rb_next(node);
-	}
-out:
-	printk("  total number of extents: %lu\n", num_extents);
-
-
-}
-EXPORT_SYMBOL(xrp_print_tree);
-
-void xrp_clear_tree(struct inode *inode)
-{
-
-	spin_lock(&inode->xrp_extent_lock);
-	xrp_do_clear_tree(&inode->i_es_tree.rb_root);
-	inode->i_es_tree.rb_root.rb_node = NULL;
-	spin_unlock(&inode->xrp_extent_lock);
-}
-EXPORT_SYMBOL(xrp_clear_tree);
-
-void xrp_retrieve_mapping(struct inode *inode, loff_t offset, loff_t len, struct xrp_mapping *mapping)
-{
-	struct rb_root *root;
-	__u64 i_lblk_start, i_lblk_end;
-	struct xrp_extent *i_extent;
-
-	i_lblk_start = offset >> XRP_BLOCK_SHIFT;
-	i_lblk_end = (offset + len - 1) >> XRP_BLOCK_SHIFT;
-
-	root = &inode->i_es_tree.rb_root;
-	if (root)
-		i_extent = xrp_do_search_extent(root, i_lblk_start);
-	else
-		i_extent = NULL;
-	if (!i_extent || i_extent->lblk > i_lblk_end) {
-		mapping->exist = false;
-	} else {
-		loff_t in_extent_offset = offset - (((u64)i_extent->lblk) << XRP_BLOCK_SHIFT);
-		loff_t in_extent_len = min(len, (((u64)i_extent->len) << XRP_BLOCK_SHIFT)
-		                                - in_extent_offset);
-
-		mapping->exist = true;
-		mapping->offset = offset;
-		mapping->len = in_extent_len;
-		mapping->address = (i_extent->pblk << XRP_BLOCK_SHIFT) + in_extent_offset;
-		mapping->version = i_extent->version;
-	}
-}
-EXPORT_SYMBOL(xrp_retrieve_mapping);
 
 static int __es_insert_extent(struct inode *inode, struct extent_status *newes);
 static int __es_remove_extent(struct inode *inode, ext4_lblk_t lblk,
@@ -1099,6 +770,14 @@ static int __es_insert_extent(struct inode *inode, struct extent_status *newes)
 				 * Here we can modify es_lblk directly
 				 * because it isn't overlapped.
 				 */
+				// if(inode->ib_enable==1&&inode->ib_es_first==1) // record the root
+				// {
+				// 	inode->ib_es[inode->ib_es_num].es_lblk = es->es_lblk;
+				// 	inode->ib_es[inode->ib_es_num].es_len = es->es_len;
+				// 	inode->ib_es[inode->ib_es_num].es_pblk  = es->es_pblk & ~ES_MASK;
+				// 	inode->ib_es_num += 1;
+				// 	inode->ib_es_first=0;
+				// }
 				es->es_lblk = newes->es_lblk;
 				es->es_len += newes->es_len;
 				if (ext4_es_is_written(es) ||
@@ -1106,13 +785,49 @@ static int __es_insert_extent(struct inode *inode, struct extent_status *newes)
 					ext4_es_store_pblock(es,
 							     newes->es_pblk);
 				es = ext4_es_try_to_merge_left(inode, es);
+				if(inode->ib_enable==1)
+					{
+						if(inode->ib_es_num>=15)
+						{
+							printk("Error! the ib_es in the inode is not enough!\n");
+						}
+						else
+						{
+							inode->ib_es[inode->ib_es_num].es_lblk = newes->es_lblk;
+							inode->ib_es[inode->ib_es_num].es_len = newes->es_len;
+							inode->ib_es[inode->ib_es_num].es_pblk  = newes->es_pblk & ~ES_MASK;
+							inode->ib_es_num += 1;
+						}
+					}
 				goto out;
 			}
 			p = &(*p)->rb_left;
 		} else if (newes->es_lblk > ext4_es_end(es)) {
 			if (ext4_es_can_be_merged(es, newes)) {
+				// if(inode->ib_enable==1&&inode->ib_es_first==1) // record the root
+				// {
+				// 	inode->ib_es[inode->ib_es_num].es_lblk = es->es_lblk;
+				// 	inode->ib_es[inode->ib_es_num].es_len = es->es_len;
+				// 	inode->ib_es[inode->ib_es_num].es_pblk  = es->es_pblk & ~ES_MASK;
+				// 	inode->ib_es_num += 1;
+				// 	inode->ib_es_first=0;
+				// }
 				es->es_len += newes->es_len;
 				es = ext4_es_try_to_merge_right(inode, es);
+				if(inode->ib_enable==1)
+					{
+						if(inode->ib_es_num>=15)
+						{
+							printk("Error! the ib_es in the inode is not enough!\n");
+						}
+						else
+						{
+							inode->ib_es[inode->ib_es_num].es_lblk = newes->es_lblk;
+							inode->ib_es[inode->ib_es_num].es_len = newes->es_len;
+							inode->ib_es[inode->ib_es_num].es_pblk  = newes->es_pblk  & ~ES_MASK;
+							inode->ib_es_num += 1;
+						}
+					}
 				goto out;
 			}
 			p = &(*p)->rb_right;
@@ -1124,6 +839,20 @@ static int __es_insert_extent(struct inode *inode, struct extent_status *newes)
 
 	es = ext4_es_alloc_extent(inode, newes->es_lblk, newes->es_len,
 				  newes->es_pblk);
+	if(inode->ib_enable==1&&newes->es_len!=0xFFFFFFFF)
+	{
+		if(inode->ib_es_num>=15)
+		{
+			printk("Error! the ib_es in the inode is not enough!\n");
+		}
+		else
+		{
+			inode->ib_es[inode->ib_es_num].es_lblk = newes->es_lblk;
+			inode->ib_es[inode->ib_es_num].es_len = newes->es_len;
+			inode->ib_es[inode->ib_es_num].es_pblk  = newes->es_pblk & ~ES_MASK;
+			inode->ib_es_num += 1;
+		}
+	}
 	if (!es)
 		return -ENOMEM;
 	rb_link_node(&es->rb_node, parent, p);

@@ -177,7 +177,7 @@ struct bpf_verifier_stack_elem {
 	u32 log_pos;
 };
 
-#define BPF_COMPLEXITY_LIMIT_JMP_SEQ	65536
+#define BPF_COMPLEXITY_LIMIT_JMP_SEQ	8192
 #define BPF_COMPLEXITY_LIMIT_STATES	64
 
 #define BPF_MAP_KEY_POISON	(1ULL << 63)
@@ -3084,10 +3084,10 @@ static int check_stack_write_fixed_off(struct bpf_verifier_env *env,
 			verbose(env, "invalid size of register spill\n");
 			return -EACCES;
 		}
-		// if (state != cur && reg->type == PTR_TO_STACK) {
-		// 	verbose(env, "cannot spill pointers to stack into stack frame of the caller\n");
-		// 	return -EINVAL;
-		// }
+		if (state != cur && reg->type == PTR_TO_STACK) {
+			verbose(env, "cannot spill pointers to stack into stack frame of the caller\n");
+			return -EINVAL;
+		}
 		save_register_state(state, spi, reg, size);
 	} else {
 		u8 type = STACK_MISC;
@@ -3616,30 +3616,30 @@ static int check_mem_region_access(struct bpf_verifier_env *env, u32 regno,
 			regno);
 		return -EACCES;
 	}
-	// err = __check_mem_access(env, regno, reg->smin_value + off, size,
-	// 			 mem_size, zero_size_allowed);
-	// if (err) {
-	// 	verbose(env, "R%d min value is outside of the allowed memory range\n",
-	// 		regno);
-	// 	return err;
-	// }
+	err = __check_mem_access(env, regno, reg->smin_value + off, size,
+				 mem_size, zero_size_allowed);
+	if (err) {
+		verbose(env, "R%d min value is outside of the allowed memory range\n",
+			regno);
+		return err;
+	}
 
 	/* If we haven't set a max value then we need to bail since we can't be
 	 * sure we won't do bad things.
 	 * If reg->umax_value + off could overflow, treat that as unbounded too.
 	 */
-	// if (reg->umax_value >= BPF_MAX_VAR_OFF) {
-	// 	verbose(env, "R%d unbounded memory access, make sure to bounds check any such access\n",
-	// 		regno);
-	// 	return -EACCES;
-	// }
-	// err = __check_mem_access(env, regno, reg->umax_value + off, size,
-	// 			 mem_size, zero_size_allowed);
-	// if (err) {
-	// 	verbose(env, "R%d max value is outside of the allowed memory range\n",
-	// 		regno);
-	// 	return err;
-	// }
+	if (reg->umax_value >= BPF_MAX_VAR_OFF) {
+		verbose(env, "R%d unbounded memory access, make sure to bounds check any such access\n",
+			regno);
+		return -EACCES;
+	}
+	err = __check_mem_access(env, regno, reg->umax_value + off, size,
+				 mem_size, zero_size_allowed);
+	if (err) {
+		verbose(env, "R%d max value is outside of the allowed memory range\n",
+			regno);
+		return err;
+	}
 
 	return 0;
 }
@@ -3987,9 +3987,7 @@ static int check_ctx_access(struct bpf_verifier_env *env, int insn_idx, int off,
 		 * type of narrower access.
 		 */
 		*reg_type = info.reg_type;
-		if (*reg_type == PTR_TO_MEM) {
-			env->insn_aux_data[insn_idx].mem_size = info.mem_size;
-		}
+
 		if (base_type(*reg_type) == PTR_TO_BTF_ID) {
 			*btf = info.btf;
 			*btf_id = info.btf_id;
@@ -4796,11 +4794,11 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 	} else if (base_type(reg->type) == PTR_TO_MEM) {
 		bool rdonly_mem = type_is_rdonly_mem(reg->type);
 
-		// if (type_may_be_null(reg->type)) {
-		// 	verbose(env, "R%d invalid mem access '%s'\n", regno,
-		// 		reg_type_str(env, reg->type));
-		// 	return -EACCES;
-		// }
+		if (type_may_be_null(reg->type)) {
+			verbose(env, "R%d invalid mem access '%s'\n", regno,
+				reg_type_str(env, reg->type));
+			return -EACCES;
+		}
 
 		if (t == BPF_WRITE && rdonly_mem) {
 			verbose(env, "R%d cannot write into %s\n",
@@ -4841,15 +4839,9 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 			/* ctx access returns either a scalar, or a
 			 * PTR_TO_PACKET[_META,_END]. In the latter
 			 * case, we know the offset is zero.
-			 *
-			 *
-			 * XRP: allow ctx access to return PTR_TO_MEM	
-			 **/		
+			 */
 			if (reg_type == SCALAR_VALUE) {
 				mark_reg_unknown(env, regs, value_regno);
-			} else if (reg_type == PTR_TO_MEM) {
-				mark_reg_known_zero(env, regs, value_regno);
-				regs[value_regno].mem_size = env->insn_aux_data[insn_idx].mem_size;
 			} else {
 				mark_reg_known_zero(env, regs,
 						    value_regno);
@@ -4951,25 +4943,17 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 
 		if (!err && value_regno >= 0 && (rdonly_mem || t == BPF_READ))
 			mark_reg_unknown(env, regs, value_regno);
-	}
-	else if (base_type(reg->type) == SCALAR_VALUE) 
-	{
-		
-	} 
-	else {
+	} else {
 		verbose(env, "R%d invalid mem access '%s'\n", regno,
 			reg_type_str(env, reg->type));
-		printk("Due to here 1!, %s\n",reg_type_str(env, reg->type));
 		return -EACCES;
 	}
 
 	if (!err && size < BPF_REG_SIZE && value_regno >= 0 && t == BPF_READ &&
 	    regs[value_regno].type == SCALAR_VALUE) {
 		/* b/h/w load zero-extends, mark upper bits as known 0 */
-		// printk("Due to here 2!, %s\n",reg_type_str(env, reg->type));
 		coerce_reg_to_size(&regs[value_regno], size);
 	}
-	
 	return err;
 }
 
@@ -5280,7 +5264,7 @@ static int check_helper_mem_access(struct bpf_verifier_env *env, int regno,
 		if (!env->ops->convert_ctx_access) {
 			enum bpf_access_type atype = meta && meta->raw_mode ? BPF_WRITE : BPF_READ;
 			int offset = access_size - 1;
-			printk("check_helper_mem_access here 1\n");
+
 			/* Allow zero-byte read from PTR_TO_CTX */
 			if (access_size == 0)
 				return zero_size_allowed ? 0 : -EACCES;
@@ -5288,11 +5272,10 @@ static int check_helper_mem_access(struct bpf_verifier_env *env, int regno,
 			return check_mem_access(env, env->insn_idx, regno, offset, BPF_B,
 						atype, -1, false);
 		}
-		return 0;
+
 		fallthrough;
 	default: /* scalar_value or invalid ptr */
 		/* Allow zero-byte read from NULL, regardless of pointer type */
-		return 0;
 		if (zero_size_allowed && access_size == 0 &&
 		    register_is_null(reg))
 			return 0;
@@ -5332,11 +5315,11 @@ static int check_mem_size_reg(struct bpf_verifier_env *env,
 		 */
 		meta = NULL;
 
-	// if (reg->smin_value < 0) {
-	// 	verbose(env, "R%d min value is negative, either use unsigned or 'var &= const'\n",
-	// 		regno);
-	// 	return -EACCES;
-	// }
+	if (reg->smin_value < 0) {
+		verbose(env, "R%d min value is negative, either use unsigned or 'var &= const'\n",
+			regno);
+		return -EACCES;
+	}
 
 	if (reg->umin_value == 0) {
 		err = check_helper_mem_access(env, regno - 1, 0,
@@ -5346,11 +5329,11 @@ static int check_mem_size_reg(struct bpf_verifier_env *env,
 			return err;
 	}
 
-	// if (reg->umax_value >= BPF_MAX_VAR_SIZ) {
-	// 	verbose(env, "R%d unbounded memory access, use 'var &= const' or 'if (var < const)'\n",
-	// 		regno);
-	// 	return -EACCES;
-	// }
+	if (reg->umax_value >= BPF_MAX_VAR_SIZ) {
+		verbose(env, "R%d unbounded memory access, use 'var &= const' or 'if (var < const)'\n",
+			regno);
+		return -EACCES;
+	}
 	err = check_helper_mem_access(env, regno - 1,
 				      reg->umax_value,
 				      zero_size_allowed, meta);
@@ -7311,12 +7294,12 @@ static int check_helper_call(struct bpf_verifier_env *env, struct bpf_insn *insn
 	memset(&meta, 0, sizeof(meta));
 	meta.pkt_access = fn->pkt_access;
 
-	// err = check_func_proto(fn, func_id);
-	// if (err) {
-	// 	verbose(env, "kernel subsystem misconfigured func %s#%d\n",
-	// 		func_id_name(func_id), func_id);
-	// 	return err;
-	// }
+	err = check_func_proto(fn, func_id);
+	if (err) {
+		verbose(env, "kernel subsystem misconfigured func %s#%d\n",
+			func_id_name(func_id), func_id);
+		return err;
+	}
 
 	meta.func_id = func_id;
 	/* check args */
@@ -7879,17 +7862,17 @@ static bool check_reg_sane_offset(struct bpf_verifier_env *env,
 		return false;
 	}
 
-	// if (smin == S64_MIN) {
-	// 	verbose(env, "math between %s pointer and register with unbounded min value is not allowed\n",
-	// 		reg_type_str(env, type));
-	// 	return false;
-	// }
+	if (smin == S64_MIN) {
+		verbose(env, "math between %s pointer and register with unbounded min value is not allowed\n",
+			reg_type_str(env, type));
+		return false;
+	}
 
-	// if (smin >= BPF_MAX_VAR_OFF || smin <= -BPF_MAX_VAR_OFF) {
-	// 	verbose(env, "value %lld makes %s pointer be out of bounds\n",
-	// 		smin, reg_type_str(env, type));
-	// 	return false;
-	// }
+	if (smin >= BPF_MAX_VAR_OFF || smin <= -BPF_MAX_VAR_OFF) {
+		verbose(env, "value %lld makes %s pointer be out of bounds\n",
+			smin, reg_type_str(env, type));
+		return false;
+	}
 
 	return true;
 }
@@ -8422,7 +8405,6 @@ static int adjust_ptr_min_max_vals(struct bpf_verifier_env *env,
 			dst, bpf_alu_string[opcode >> 4]);
 		return -EACCES;
 	default:
-		return 0;
 		/* other operators (e.g. MUL,LSH) produce non-pointer results */
 		verbose(env, "R%d pointer arithmetic with %s operator prohibited\n",
 			dst, bpf_alu_string[opcode >> 4]);
@@ -10651,9 +10633,7 @@ static int check_return_code(struct bpf_verifier_env *env)
 	case BPF_PROG_TYPE_SK_LOOKUP:
 		range = tnum_range(SK_DROP, SK_PASS);
 		break;
-	case BPF_PROG_TYPE_IOURING:
-		range = tnum_const(0);
-		break;
+
 	case BPF_PROG_TYPE_LSM:
 		if (env->prog->expected_attach_type != BPF_LSM_CGROUP) {
 			/* Regular BPF_PROG_TYPE_LSM programs can return
@@ -15114,14 +15094,7 @@ static int check_attach_btf_id(struct bpf_verifier_env *env)
 		verbose(env, "Syscall programs can only be sleepable\n");
 		return -EINVAL;
 	}
-	
-	// if (prog->type == BPF_PROG_TYPE_IOURING) {
-	// 	if (prog->aux->sleepable)
-	// 		/* attach_btf_id checked to be zero already */
-	// 		return 0;
-	// 	verbose(env, "Syscall programs can only be sleepable\n");
-	// 	return -EINVAL;
-	// }
+
 	if (prog->aux->sleepable && prog->type != BPF_PROG_TYPE_TRACING &&
 	    prog->type != BPF_PROG_TYPE_LSM && prog->type != BPF_PROG_TYPE_KPROBE) {
 		verbose(env, "Only fentry/fexit/fmod_ret, lsm, and kprobe/uprobe programs can be sleepable\n");

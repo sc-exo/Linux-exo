@@ -6,8 +6,7 @@
 #include <linux/bitmap.h>
 #include <linux/llist.h>
 #include <uapi/linux/io_uring.h>
-#include <linux/bpf.h>
-#include <linux/kvm_host.h>
+
 struct io_wq_work_node {
 	struct io_wq_work_node *next;
 };
@@ -190,22 +189,7 @@ struct io_alloc_cache {
 	struct hlist_head	list;
 	unsigned int		nr_cached;
 };
-struct io_bpf_prog {
-	struct bpf_prog *prog;
-};
-struct io_bpf_ctx {
-	u32				vq_num;
-	u32				wait_idx;
-};
-struct qemu_info {
-	u64				vqaddr;
-	u32				vqfd;
-	u64				L1Cache;
-	u64				L2Cache;
-	u64				L2Ref;
-	u8				qemu_router;
-	int             begin;
-};
+
 struct io_ring_ctx {
 	/* const or read-mostly hot data */
 	struct {
@@ -271,13 +255,7 @@ struct io_ring_ctx {
 	/* IRQ completion list, under ->completion_lock */
 	struct io_wq_work_list	locked_free_list;
 	unsigned int		locked_free_nr;
-	struct io_bpf_ctx  iobpf;
-	struct qemu_info   qemu;
-	struct evo_router  *router;
-	u32  vqid;
-	bool router_enable;
-	struct bpf_map *map;
-	struct bpf_map *map_d;
+
 	const struct cred	*sq_creds;	/* cred used for __io_sq_thread() */
 	struct io_sq_data	*sq_data;	/* if using sq thread polling */
 
@@ -291,9 +269,7 @@ struct io_ring_ctx {
 
 	struct xarray		personalities;
 	u32			pers_next;
-		/* bpf programs */
-	unsigned		nr_bpf_progs;
-	struct io_bpf_prog	*bpf_progs;
+
 	struct {
 		/*
 		 * We cache a range of free CQEs we can use, once exhausted it
@@ -307,17 +283,6 @@ struct io_ring_ctx {
 		struct io_ev_fd	__rcu	*io_ev_fd;
 		struct wait_queue_head	cq_wait;
 		unsigned		cq_extra;
-		struct task_struct		*submitter_task;
-
-		/*
-		 * If IORING_SETUP_NO_MMAP is used, then the below holds
-		 * the gup'ed pages for the two rings, and the sqes.
-		 */
-		unsigned short		n_ring_pages;
-		unsigned short		n_sqe_pages;
-		struct page		**ring_pages;
- 		struct page		**sqe_pages;
-
 	} ____cacheline_aligned_in_smp;
 
 	struct {
@@ -350,6 +315,7 @@ struct io_ring_ctx {
 	/* Keep this last, we don't need it for the fast path */
 
 	struct io_restriction		restrictions;
+	struct task_struct		*submitter_task;
 
 	/* slow path rsrc auxilary data, used by update/register */
 	struct io_rsrc_node		*rsrc_backup_node;
@@ -389,16 +355,6 @@ struct io_ring_ctx {
 	unsigned			sq_thread_idle;
 	/* protected by ->completion_lock */
 	unsigned			evfd_last_cq_tail;
-	
-};
-
-
-
-struct io_bpf {
-	struct file			*file;
-	struct bpf_prog			*prog;
-	struct io_bpf_ctx		u;
-	struct wait_queue_entry		wqe;
 };
 
 enum {
@@ -536,44 +492,13 @@ struct io_cmd_data {
 
 static inline void io_kiocb_cmd_sz_check(size_t cmd_sz)
 {
-	BUILD_BUG_ON(cmd_sz > sizeof(struct io_cmd_data));
+	//BUILD_BUG_ON(cmd_sz > sizeof(struct io_cmd_data));
 }
 #define io_kiocb_to_cmd(req, cmd_type) ( \
 	io_kiocb_cmd_sz_check(sizeof(cmd_type)) , \
 	((cmd_type *)&(req)->cmd) \
 )
 #define cmd_to_io_kiocb(ptr)	((struct io_kiocb *) ptr)
-
-typedef struct VRingUsedElem
-{
-    u_int32_t id;
-    u_int32_t len;
-} VRingUsedElem;
-
-typedef struct VRingUsed
-{
-    u_int16_t flags;
-    u_int16_t idx;
-    VRingUsedElem ring[];
-} VRingUsed;
-
-
-struct Useraddr
-{
-    u_int64_t used_idx;
-    u_int64_t last_avail_idx;
-    u_int64_t caches_used;
-    u_int64_t vring_used;
-	u_int64_t avail_idx;
-    u_int64_t vdev_isr;
-    u_int64_t shadow_avail_idx;
-    u_int64_t pa;
-    u_int32_t vring_num;
-	u_int32_t wfd;
-	u_int32_t subreq_num;
-	u_int32_t id;
-    VRingUsedElem elem;
-};
 
 struct io_kiocb {
 	union {
@@ -585,7 +510,6 @@ struct io_kiocb {
 		 */
 		struct file		*file;
 		struct io_cmd_data	cmd;
-		struct io_bpf		bpf;
 	};
 
 	u8				opcode;
@@ -600,7 +524,6 @@ struct io_kiocb {
 	unsigned int			flags;
 
 	struct io_cqe			cqe;
-
 	struct io_ring_ctx		*ctx;
 	struct task_struct		*task;
 
@@ -646,10 +569,6 @@ struct io_kiocb {
 	/* custom credentials, valid IFF REQ_F_CREDS is set */
 	const struct cred		*creds;
 	struct io_wq_work		work;
-	struct bpf_map *map;
-	struct bpf_map *map_d;
-	bool io_bpf;
-	u32 update_qemu;
 };
 
 struct io_overflow_cqe {

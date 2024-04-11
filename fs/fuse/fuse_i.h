@@ -249,6 +249,7 @@ struct fuse_page_desc {
 struct fuse_args {
 	uint64_t nodeid;
 	uint32_t opcode;
+	unsigned int long bpf_ino;
 	unsigned short in_numargs;
 	unsigned short out_numargs;
 	bool force:1;
@@ -290,6 +291,9 @@ struct fuse_io_priv {
 	struct kiocb *iocb;
 	struct completion *done;
 	bool blocking;
+	/*to pass the ib related information*/
+	unsigned int	ib_enable;
+	unsigned long int	bpf_ino;
 };
 
 #define FUSE_IO_PRIV_SYNC(i) \

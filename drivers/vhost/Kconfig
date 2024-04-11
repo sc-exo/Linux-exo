@@ -93,7 +93,7 @@ config VHOST_BLK
 	tristate "Host kernel accelerator for virtio-blk"
 	depends on BLOCK && EVENTFD
 	select VHOST
-	default y
+	default n
 	help
 	  This kernel module can be loaded in host kernel to accelerate
 	  guest vm with virtio-blk driver.

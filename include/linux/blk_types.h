@@ -10,7 +10,7 @@
 #include <linux/bvec.h>
 #include <linux/device.h>
 #include <linux/ktime.h>
-#include <linux/fs.h>
+
 struct bio_set;
 struct bio;
 struct bio_integrity_payload;
@@ -65,8 +65,6 @@ struct block_device {
 	struct super_block	*bd_fsfreeze_sb;
 
 	struct partition_meta_info *bd_meta_info;
-	bool ib_enalbe;
-	struct bpf_prog		*xrp_bpf_prog;
 #ifdef CONFIG_FAIL_MAKE_REQUEST
 	bool			bd_make_it_fail;
 #endif
@@ -247,14 +245,20 @@ typedef __u32 __bitwise blk_opf_t;
 typedef unsigned int blk_qc_t;
 #define BLK_QC_T_NONE		-1U
 
+struct ib_extent_status {
+	__u32 es_lblk;	/* first logical block extent covers */
+	__u32 es_len;	/* length of extent in block */
+	__u64 es_pblk;	/* first physical block */
+};
 /*
  * main unit of I/O for the block layer and lower layers (ie drivers and
  * stacking drivers)
  */
-
-
-
 struct bio {
+	unsigned int 	ib_enable;
+	struct ib_extent_status ib_es[15];
+	unsigned int 	ib_es_num;
+	struct inode *inode;
 	struct bio		*bi_next;	/* request queue link */
 	struct block_device	*bi_bdev;
 	blk_opf_t		bi_opf;		/* bottom bits REQ_OP, top bits
@@ -313,14 +317,6 @@ struct bio {
 	 * double allocations for a small number of bio_vecs. This member
 	 * MUST obviously be kept at the very end of the bio.
 	 */
-
-	bool			xrp_enabled;
-	struct inode		*xrp_inode;
-	u64			xrp_partition_start_sector;
-	int			xrp_count;
-	struct ScatterGatherQuery 	xrp_scratch_page;
-	u64			xrp_extent_version;
-	loff_t			xrp_file_offset;
 	struct bio_vec		bi_inline_vecs[];
 };
 

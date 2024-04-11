@@ -16,3 +16,8 @@ several of them using the Restructured Text markup notation.
 Please read the Documentation/process/changes.rst file, as it contains the
 requirements for building and running the kernel, and information about
 the problems which may result by upgrading your kernel.
+
+Warning:
+The ext4 metadata synchronization has bugs in this version, if the VM shutdown 
+accidently, the superblock in the disk may get broken, and result that the mount
+failure.

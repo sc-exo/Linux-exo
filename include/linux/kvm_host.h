@@ -44,7 +44,7 @@
 
 #include <asm/kvm_host.h>
 #include <linux/kvm_dirty_ring.h>
-#include <linux/bpf.h>
+
 #ifndef KVM_MAX_VCPU_IDS
 #define KVM_MAX_VCPU_IDS KVM_MAX_VCPUS
 #endif
@@ -379,8 +379,6 @@ struct kvm_vcpu {
 	 */
 	struct kvm_memory_slot *last_used_slot;
 	u64 last_used_slot_gen;
-	struct bpf_map *map;
-	int ring_fd;
 };
 
 /*
@@ -687,11 +685,6 @@ struct kvm_memslots {
 	DECLARE_HASHTABLE(id_hash, 7);
 	int node_idx;
 };
-struct evo_router
-{
-	struct mutex router_lock;
-	u32 router;
-};
 
 struct kvm {
 #ifdef KVM_HAVE_MMU_RWLOCK
@@ -701,11 +694,6 @@ struct kvm {
 #endif /* KVM_HAVE_MMU_RWLOCK */
 
 	struct mutex slots_lock;
-	struct bpf_map *map;
-	int ring_fd;
-	
-	bool enable_router;
-	struct evo_router router[8];
 
 	/*
 	 * Protects the arch-specific fields of struct kvm_memory_slots in

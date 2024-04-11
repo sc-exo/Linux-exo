@@ -83,7 +83,7 @@ struct ctl_table_header;
 #define BPF_SYM_ELF_TYPE	't'
 
 /* BPF program can access up to 512 bytes of stack space. */
-#define MAX_BPF_STACK	2048
+#define MAX_BPF_STACK	512
 
 /* Helper macros for filter block array initializers. */
 
@@ -1541,30 +1541,5 @@ static __always_inline int __bpf_xdp_redirect_map(struct bpf_map *map, u32 ifind
 
 	return XDP_REDIRECT;
 }
-struct bpf_xrp_kern {
-	int32_t done;
-	uint64_t next_addr[16];
-	uint64_t size[16];
-	char *data;
-	char *scratch;
-};
 
-struct xrp_stats {
-	long xrp_ebpf_time;
-	long xrp_ebpf_count;
-
-	long xrp_resubmit_leaf_time;
-	long xrp_resubmit_leaf_count;
-
-	long xrp_resubmit_int_time;
-	long xrp_resubmit_int_count;
-
-	long xrp_resubmit_level_nr;
-	long xrp_resubmit_level_count;
-
-	long xrp_extent_lookup_time;
-	long xrp_extent_lookup_count;
-};
-
-void ebpf_dump_page(uint8_t *page_image, uint64_t size);
 #endif /* __LINUX_FILTER_H__ */

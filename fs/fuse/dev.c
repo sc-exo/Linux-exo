@@ -475,6 +475,7 @@ static void fuse_args_to_req(struct fuse_req *req, struct fuse_args *args)
 {
 	req->in.h.opcode = args->opcode;
 	req->in.h.nodeid = args->nodeid;
+	req->in.h.bpf_ino = args->bpf_ino;
 	req->args = args;
 	if (args->end)
 		__set_bit(FR_ASYNC, &req->flags);

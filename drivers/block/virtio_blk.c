@@ -16,7 +16,7 @@
 #include <linux/blk-mq-virtio.h>
 #include <linux/numa.h>
 #include <uapi/linux/virtio_ring.h>
-
+#include <linux/fs.h>
 #define PART_BITS 4
 #define VQ_NAME_LEN 16
 #define MAX_DISCARD_SEGMENTS 256u
@@ -84,14 +84,14 @@ struct virtio_blk {
 
 struct virtblk_req {
 	struct virtio_blk_outhdr out_hdr;
-	u8 status;
+	struct ib_mesg ibmsg;
 	struct sg_table sg_table;
 	struct scatterlist sg[];
 };
 
 static inline blk_status_t virtblk_result(struct virtblk_req *vbr)
 {
-	switch (vbr->status) {
+	switch (vbr->ibmsg.status) {
 	case VIRTIO_BLK_S_OK:
 		return BLK_STS_OK;
 	case VIRTIO_BLK_S_UNSUPP:
@@ -124,7 +124,7 @@ static int virtblk_add_req(struct virtqueue *vq, struct virtblk_req *vbr)
 			sgs[num_out + num_in++] = vbr->sg_table.sgl;
 	}
 
-	sg_init_one(&status, &vbr->status, sizeof(vbr->status));
+	sg_init_one(&status, &vbr->ibmsg, sizeof(vbr->ibmsg));
 	sgs[num_out + num_in++] = &status;
 
 	return virtqueue_add_sgs(vq, sgs, num_out, num_in, vbr, GFP_ATOMIC);
@@ -272,7 +272,7 @@ static inline void virtblk_request_done(struct request *req)
 	blk_mq_end_request(req, virtblk_result(vbr));
 }
 
-static void virtblk_done(struct virtqueue *vq)
+void virtblk_done(struct virtqueue *vq)
 {
 	struct virtio_blk *vblk = vq->vdev->priv;
 	bool req_done = false;
@@ -280,13 +280,30 @@ static void virtblk_done(struct virtqueue *vq)
 	struct virtblk_req *vbr;
 	unsigned long flags;
 	unsigned int len;
-
+	int i=0;
 	spin_lock_irqsave(&vblk->vqs[qid].lock, flags);
 	do {
 		virtqueue_disable_cb(vq);
 		while ((vbr = virtqueue_get_buf(vblk->vqs[qid].vq, &len)) != NULL) {
 			struct request *req = blk_mq_rq_from_pdu(vbr);
-
+		
+			if(req->ib_enable == 1&&vbr->out_hdr.type  == 0)
+			{
+				if(req->inode->ib_enable==1)
+				{
+					for(i=0;i<vbr->out_hdr.ib_es_num;i++)
+					{
+						// printk("The kye is %u, found %u\n", req->inode->ib_es[i].es_lblk, \
+						// vbr->ibmsg.query.found);
+						//update the inode result;
+						// req->inode->ib_es[i].es_len = vbr->out_hdr.ib_es[i].es_len;
+						// req->inode->ib_es[i].es_pblk = vbr->out_hdr.ib_es[i].es_pblk;
+						req->inode->query.found = vbr->ibmsg.query.found;
+						memcpy(&req->inode->query.value, &vbr->ibmsg.query.value, sizeof(val__t));
+					}
+					
+				}
+			}
 			if (likely(!blk_should_fake_timeout(req->q)))
 				blk_mq_complete_request(req);
 			req_done = true;
@@ -348,7 +365,8 @@ static blk_status_t virtio_queue_rq(struct blk_mq_hw_ctx *hctx,
 	bool notify = false;
 	blk_status_t status;
 	int err;
-
+	vbr->out_hdr.ib_enable =0;
+	vbr->out_hdr.ib_es_num = 0;
 	status = virtblk_prep_rq(hctx, vblk, req, vbr);
 	if (unlikely(status))
 		return status;
@@ -388,7 +406,8 @@ static bool virtblk_prep_rq_batch(struct request *req)
 {
 	struct virtio_blk *vblk = req->mq_hctx->queue->queuedata;
 	struct virtblk_req *vbr = blk_mq_rq_to_pdu(req);
-
+	vbr->out_hdr.ib_enable =0;
+	vbr->out_hdr.ib_es_num = 0;
 	req->mq_hctx->tags->rqs[req->tag] = req;
 
 	return virtblk_prep_rq(req->mq_hctx, vblk, req, vbr) == BLK_STS_OK;
@@ -400,13 +419,26 @@ static bool virtblk_add_req_batch(struct virtio_blk_vq *vq,
 	unsigned long flags;
 	int err;
 	bool kick;
-
+	int i =0;
 	spin_lock_irqsave(&vq->lock, flags);
 
 	while (!rq_list_empty(*rqlist)) {
 		struct request *req = rq_list_pop(rqlist);
 		struct virtblk_req *vbr = blk_mq_rq_to_pdu(req);
-
+		vbr->out_hdr.ib_enable =0;
+		vbr->out_hdr.ib_es_num = 0;
+		if(req->ib_enable==1)
+		{
+			vbr->out_hdr.ib_enable = 1;
+			vbr->out_hdr.ib_es_num = req->ib_es_num;
+			for(i =0; i< req->ib_es_num; i++)
+			{
+				vbr->out_hdr.ib_es[i].es_lblk = req->ib_es[i].es_lblk;
+				vbr->out_hdr.ib_es[i].es_len = req->ib_es[i].es_len;
+				vbr->out_hdr.ib_es[i].es_pblk = req->ib_es[i].es_pblk;
+			}
+			req->ib_es_num = 0;
+		}
 		err = virtblk_add_req(vq->vq, vbr);
 		if (err) {
 			virtblk_unmap_data(req, vbr);
@@ -858,7 +890,7 @@ static int virtblk_poll(struct blk_mq_hw_ctx *hctx, struct io_comp_batch *iob)
 		struct request *req = blk_mq_rq_from_pdu(vbr);
 
 		found++;
-		if (!blk_mq_add_to_batch(req, iob, vbr->status,
+		if (!blk_mq_add_to_batch(req, iob, vbr->ibmsg.status,
 						virtblk_complete_batch))
 			blk_mq_complete_request(req);
 	}

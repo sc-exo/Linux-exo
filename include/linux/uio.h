@@ -325,12 +325,8 @@ bool csum_and_copy_from_iter_full(void *addr, size_t bytes,
 }
 size_t hash_and_copy_to_iter(const void *addr, size_t bytes, void *hashp,
 		struct iov_iter *i);
-int copy_iovec_from_kernel(struct iovec *iov,
-		const struct iovec *uvec, unsigned long nr_segs);
+
 struct iovec *iovec_from_user(const struct iovec __user *uvector,
-		unsigned long nr_segs, unsigned long fast_segs,
-		struct iovec *fast_iov, bool compat);
-struct iovec *iovec_from_kernel(const struct iovec *uvec,
 		unsigned long nr_segs, unsigned long fast_segs,
 		struct iovec *fast_iov, bool compat);
 ssize_t import_iovec(int type, const struct iovec __user *uvec,
@@ -339,13 +335,9 @@ ssize_t import_iovec(int type, const struct iovec __user *uvec,
 ssize_t __import_iovec(int type, const struct iovec __user *uvec,
 		 unsigned nr_segs, unsigned fast_segs, struct iovec **iovp,
 		 struct iov_iter *i, bool compat);
-ssize_t __import_iovec_bpf(int type, const struct iovec *uvec,
-		 unsigned nr_segs, unsigned fast_segs, struct iovec **iovp,
-		 struct iov_iter *i, bool compat);
 int import_single_range(int type, void __user *buf, size_t len,
 		 struct iovec *iov, struct iov_iter *i);
-int import_single_range_bpf(int rw, void *buf, size_t len,
-		 struct iovec *iov, struct iov_iter *i);
+
 static inline void iov_iter_ubuf(struct iov_iter *i, unsigned int direction,
 			void __user *buf, size_t count)
 {

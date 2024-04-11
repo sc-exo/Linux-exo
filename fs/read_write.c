@@ -592,7 +592,40 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 	file_end_write(file);
 	return ret;
 }
+ssize_t vfs_write_ib(struct file *file, const char __user *buf, size_t count, loff_t *pos, unsigned int ib_enable)
+{
+	ssize_t ret;
+	struct inode *inode = file_inode(file);
+	if (!(file->f_mode & FMODE_WRITE))
+		return -EBADF;
+	if (!(file->f_mode & FMODE_CAN_WRITE))
+		return -EINVAL;
+	if (unlikely(!access_ok(buf, count)))
+		return -EFAULT;
 
+	ret = rw_verify_area(WRITE, file, pos, count);
+	if (ret)
+		return ret;
+	if (count > MAX_RW_COUNT)
+		count =  MAX_RW_COUNT;
+	if(ib_enable)
+		inode->ib_enable = 1;
+
+	file_start_write(file);
+	if (file->f_op->write)
+		ret = file->f_op->write(file, buf, count, pos);
+	else if (file->f_op->write_iter)
+		ret = new_sync_write(file, buf, count, pos);
+	else
+		ret = -EINVAL;
+	if (ret > 0) {
+		fsnotify_modify(file);
+		add_wchar(current, ret);
+	}
+	inc_syscw(current);
+	file_end_write(file);
+	return ret;
+}
 /* file_ppos returns &file->f_pos or NULL if file is stream */
 static inline loff_t *file_ppos(struct file *file)
 {
@@ -623,6 +656,125 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	return ksys_read(fd, buf, count);
 }
 
+
+ssize_t vfs_read_ib(struct file *file, char __user *data_buf, size_t count, loff_t *pos, unsigned int ib_enable, char __user *scratch_buf)
+{
+	ssize_t ret;
+	struct  ScatterGatherQuery *tmp= NULL;
+	// struct page	*xrp_scratch_page;
+
+	int i;
+	struct inode *inode = file_inode(file);
+	if (!(file->f_mode & FMODE_READ))
+		return -EBADF;
+	if (!(file->f_mode & FMODE_CAN_READ))
+		return -EINVAL;
+	if (unlikely(!access_ok(data_buf, count)))
+		return -EFAULT;
+	if (unlikely(!access_ok(scratch_buf, PAGE_SIZE)))
+		return -EFAULT;
+	tmp = kmalloc(sizeof(struct ScatterGatherQuery), GFP_KERNEL); 
+	if(tmp == NULL)
+	{
+		printk("error: allo\n");
+		return -EFAULT;
+	}
+	ret = rw_verify_area(READ, file, pos, count);
+	if (ret)
+		return ret;
+	if (count > MAX_RW_COUNT)
+		count =  MAX_RW_COUNT;
+	if(ib_enable == 1)
+	{
+
+		ret = copy_from_user(tmp, (struct ScatterGatherQuery *)scratch_buf, sizeof(struct ScatterGatherQuery)); 
+		if(ret) 
+		{
+			kfree(tmp);
+			printk("copy write mesg from user error, ret = %d\n", ret);
+			return -EFAULT;
+		}
+		// if (get_user_pages_fast(scratch_buf, 1, FOLL_WRITE, &xrp_scratch_page) != 1) {
+		// 	printk("iomap_dio_bio_actor: failed to get scratch page\n");
+			
+		// }
+
+		inode->ib_enable = 1;
+		//printk("the num to be search is %d!\n",tmp->n_keys);
+		inode->ib_es_num = tmp->n_keys;
+		for(i=0;i<tmp->n_keys;i++)
+		{
+			// printk("the key to be search is %u!\n",tmp->keys[i]);
+
+			inode->ib_es[i].es_lblk = tmp->keys[i]; //use lblk to tranes the key to be search
+		}
+
+	}
+
+	if (file->f_op->read)
+		ret = file->f_op->read(file, data_buf, count, pos);
+	else if (file->f_op->read_iter)
+		ret = new_sync_read(file, data_buf, count, pos);
+	else
+		ret = -EINVAL;
+	if (ret > 0) {
+	/*result is ok update the result */
+	if(ib_enable == 1)
+	{
+		for(i=0;i<tmp->n_keys;i++)
+		{
+			
+			// tmp->values[i].found = inode->ib_es[i].es_len; // use len to identiy whether the key is found;
+			// tmp->values[i].value = (__u8)inode->ib_es[i].es_pblk;; // use pblk to trans the value in db;
+			tmp->values[i].found = inode->query.found; // use len to identiy whether the key is found;
+			if(tmp->values[i].found == 1)
+			{
+				
+				memcpy(tmp->values[i].value, inode->query.value, sizeof(val__t));
+			}
+			// printk("the key to be search is %u, found is %u!\n",tmp->keys[i],tmp->values[i].found);
+			
+		}
+		if (copy_to_user(scratch_buf, tmp , sizeof(struct ScatterGatherQuery)))
+		{
+			printk("put Query Failed!\n");
+			return -EFAULT;
+		}
+
+	}
+		fsnotify_access(file);
+		add_rchar(current, ret);
+	}
+	kfree(tmp);
+
+	inc_syscr(current);
+	return ret;
+}
+
+ssize_t ksys_read_ib(unsigned int fd, char __user *data_buf,
+                      size_t count, loff_t pos, unsigned int ib_enable,char __user *scratch_buf)
+{
+	struct fd f;
+	ssize_t ret = -EBADF;
+
+	if (pos < 0)
+		return -EINVAL;
+
+	f = fdget(fd);
+	if (f.file) {
+		ret = -ESPIPE;
+		if (f.file->f_mode & FMODE_PREAD)
+			ret = vfs_read_ib(f.file, data_buf, count, &pos, ib_enable,scratch_buf);
+		fdput(f);
+	}
+
+	return ret;
+}
+
+SYSCALL_DEFINE6(read_ib, unsigned int, fd, char __user *, buf, size_t, count, loff_t, pos, unsigned int, ib_enable, char __user *,scratch_buf)
+{
+	return ksys_read_ib(fd, buf, count, pos, ib_enable, scratch_buf);
+}
 ssize_t ksys_write(unsigned int fd, const char __user *buf, size_t count)
 {
 	struct fd f = fdget_pos(fd);
@@ -648,6 +800,31 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 {
 	return ksys_write(fd, buf, count);
 }
+ssize_t ksys_write_ib(unsigned int fd, const char __user *buf, size_t count, unsigned int ib_enable)
+{
+	struct fd f = fdget_pos(fd);
+	ssize_t ret = -EBADF;
+
+	if (f.file) {
+		loff_t pos, *ppos = file_ppos(f.file);
+		if (ppos) {
+			pos = *ppos;
+			ppos = &pos;
+		}
+		ret = vfs_write_ib(f.file, buf, count, ppos, ib_enable);
+		if (ret >= 0 && ppos)
+			f.file->f_pos = pos;
+		fdput_pos(f);
+	}
+
+	return ret;
+}
+
+SYSCALL_DEFINE4(write_ib, unsigned int, fd, const char __user *, buf,
+		size_t, count, unsigned int, ib_enable)
+{
+	return ksys_write_ib(fd, buf, count, ib_enable);
+}
 
 ssize_t ksys_pread64(unsigned int fd, char __user *buf, size_t count,
 		     loff_t pos)
@@ -668,7 +845,7 @@ ssize_t ksys_pread64(unsigned int fd, char __user *buf, size_t count,
 
 	return ret;
 }
-EXPORT_SYMBOL(ksys_pread64);
+
 SYSCALL_DEFINE4(pread64, unsigned int, fd, char __user *, buf,
 			size_t, count, loff_t, pos)
 {
@@ -708,6 +885,82 @@ SYSCALL_DEFINE4(pwrite64, unsigned int, fd, const char __user *, buf,
 {
 	return ksys_pwrite64(fd, buf, count, pos);
 }
+
+static ssize_t new_sync_read_load_ebpf(struct file *filp, char __user *data_buf, size_t len, loff_t *ppos, unsigned long int bpf_ino)
+{
+	struct iovec iov = { .iov_base = data_buf, .iov_len = len };
+	struct kiocb kiocb;
+	struct iov_iter iter;
+	ssize_t ret = -EBADF;
+	init_sync_kiocb(&kiocb, filp);
+	kiocb.ki_pos = (ppos ? *ppos : 0);
+	kiocb.ib_enable = true;
+	kiocb.bpf_ino = bpf_ino;
+	iov_iter_init(&iter, READ, &iov, 1, len);
+	ret = call_read_iter(filp, &kiocb, &iter);
+	BUG_ON(ret == -EIOCBQUEUED);
+	if (ppos)
+		*ppos = kiocb.ki_pos;
+	return ret;
+}
+
+
+ssize_t vfs_load_ebpf_host(struct file *file, char __user *data_buf, size_t count, loff_t *pos, unsigned long int bpf_ino)
+{
+	ssize_t ret;
+
+	if (!(file->f_mode & FMODE_READ))
+		return -EBADF;
+	if (!(file->f_mode & FMODE_CAN_READ))
+		return -EINVAL;
+	if (unlikely(!access_ok(data_buf, count)))
+		return -EFAULT;
+
+	ret = rw_verify_area(READ, file, pos, count);
+	if (ret)
+		return ret;
+	if (count > MAX_RW_COUNT)
+		count =  MAX_RW_COUNT;
+
+	if (file->f_op->read)
+		ret = file->f_op->read(file, data_buf, count, pos);
+	else if (file->f_op->read_iter)
+		ret = new_sync_read_load_ebpf(file, data_buf, count, pos, bpf_ino);
+	else
+		ret = -EINVAL;
+	if (ret > 0) {
+		fsnotify_access(file);
+		add_rchar(current, ret);
+	}
+	inc_syscr(current);
+	return ret;
+}
+ssize_t ksys_load_ebpf_host(unsigned int fd, char __user *data_buf,
+                      size_t count, loff_t pos, unsigned long int bpf_ino)
+{
+	struct fd f;
+	ssize_t ret = -EBADF;
+
+	if (pos < 0)
+		return -EINVAL;
+
+	f = fdget(fd);
+	if (f.file) {
+		ret = -ESPIPE;
+		if (f.file->f_mode & FMODE_PREAD)
+			ret = vfs_load_ebpf_host(f.file, data_buf, count, &pos, bpf_ino);
+		fdput(f);
+	}
+
+	return ret;
+}
+SYSCALL_DEFINE5(load_ebpf_host, unsigned int, fd, char __user *, data_buf,
+			size_t, count, loff_t, pos, unsigned long int, bpf_ino)
+{
+	return ksys_load_ebpf_host(fd, data_buf, count, pos, bpf_ino);
+}
+
+
 
 #if defined(CONFIG_COMPAT) && defined(__ARCH_WANT_COMPAT_PWRITE64)
 COMPAT_SYSCALL_DEFINE5(pwrite64, unsigned int, fd, const char __user *, buf,

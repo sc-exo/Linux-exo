@@ -68,8 +68,6 @@ static const struct bpf_map_ops * const bpf_map_types[] = {
 #undef BPF_LINK_TYPE
 };
 
-# define offsetofend(TYPE, FIELD) \
-	(offsetof(TYPE, FIELD) + sizeof(((TYPE *)0)->FIELD))
 /*
  * If we're handed a bigger struct than we know of, ensure all the unknown bits
  * are 0 - i.e. new user-space does not rely on any kernel feature extensions
@@ -153,7 +151,7 @@ bool bpf_map_write_active(const struct bpf_map *map)
 	return atomic64_read(&map->writecnt) != 0;
 }
 
-u32 bpf_map_value_size(const struct bpf_map *map)
+static u32 bpf_map_value_size(const struct bpf_map *map)
 {
 	if (map->map_type == BPF_MAP_TYPE_PERCPU_HASH ||
 	    map->map_type == BPF_MAP_TYPE_LRU_PERCPU_HASH ||
@@ -165,7 +163,6 @@ u32 bpf_map_value_size(const struct bpf_map *map)
 	else
 		return  map->value_size;
 }
-EXPORT_SYMBOL_GPL(bpf_map_value_size);
 
 static void maybe_wait_bpf_programs(struct bpf_map *map)
 {
@@ -235,7 +232,7 @@ static int bpf_map_update_value(struct bpf_map *map, struct fd f, void *key,
 	return err;
 }
 
-int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
+static int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
 			      __u64 flags)
 {
 	void *ptr;
@@ -295,7 +292,6 @@ int bpf_map_copy_value(struct bpf_map *map, void *key, void *value,
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(bpf_map_copy_value);
 
 /* Please, do not use this function outside from the map creation path
  * (e.g. in map update path) without taking care of setting the active
@@ -2432,7 +2428,6 @@ static bool is_net_admin_prog_type(enum bpf_prog_type prog_type)
 	case BPF_PROG_TYPE_CGROUP_SOCKOPT:
 	case BPF_PROG_TYPE_CGROUP_SYSCTL:
 	case BPF_PROG_TYPE_SOCK_OPS:
-	case BPF_PROG_TYPE_IOURING:
 	case BPF_PROG_TYPE_EXT: /* extends any prog */
 		return true;
 	case BPF_PROG_TYPE_CGROUP_SKB:
@@ -2673,23 +2668,12 @@ static int bpf_obj_get(const union bpf_attr *attr)
 {
 	if (CHECK_ATTR(BPF_OBJ) || attr->bpf_fd != 0 ||
 	    attr->file_flags & ~BPF_OBJ_FLAG_MASK)
-		{
-			return -EINVAL;
-		}	
+		return -EINVAL;
+
 	return bpf_obj_get_user(u64_to_user_ptr(attr->pathname),
 				attr->file_flags);
 }
 
-static int bpf_obj_get_IB(const union bpf_attr *attr)
-{
-	if (CHECK_ATTR(BPF_OBJ) || attr->bpf_fd != 0 ||
-	    attr->file_flags & ~BPF_OBJ_FLAG_MASK)
-		{
-			return -EINVAL;
-		}	
-	return bpf_obj_get_user_ib((void *)(uintptr_t)(attr->pathname),
-				attr->file_flags);
-}
 void bpf_link_init(struct bpf_link *link, enum bpf_link_type type,
 		   const struct bpf_link_ops *ops, struct bpf_prog *prog)
 {
@@ -4943,17 +4927,21 @@ static int __sys_bpf(int cmd, bpfptr_t uattr, unsigned int size)
 	if (!capable &&
 	    (cmd == BPF_MAP_CREATE || cmd == BPF_PROG_LOAD))
 		return -EPERM;
+
 	err = bpf_check_uarg_tail_zero(uattr, sizeof(attr), size);
 	if (err)
 		return err;
 	size = min_t(u32, size, sizeof(attr));
+
 	/* copy attributes from user space, may be less than sizeof(bpf_attr) */
 	memset(&attr, 0, sizeof(attr));
 	if (copy_from_bpfptr(&attr, uattr, size) != 0)
 		return -EFAULT;
+
 	err = security_bpf(cmd, &attr, size);
 	if (err < 0)
 		return err;
+
 	switch (cmd) {
 	case BPF_MAP_CREATE:
 		err = map_create(&attr);
@@ -5081,50 +5069,6 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 	return __sys_bpf(cmd, USER_BPFPTR(uattr), size);
 }
 
-static int __sys_bpf_ib(bpfptr_t uattr, unsigned int size)
-{
-	union bpf_attr attr;
-	bool capable;
-	int err;
-	int cmd = BPF_OBJ_GET;
-	capable = bpf_capable() || !sysctl_unprivileged_bpf_disabled;
-
-	if (!capable)
-		return -EPERM;
-	err = bpf_check_uarg_tail_zero(uattr, sizeof(attr), size);
-	if (err)
-		return err;
-	size = min_t(u32, size, sizeof(attr));
-	/* copy attributes from user space, may be less than sizeof(bpf_attr) */
-	memset(&attr, 0, sizeof(attr));
-	if (copy_from_bpfptr(&attr, uattr, size) != 0)
-		return -EFAULT;
-	err = security_bpf(cmd, &attr, size);
-	if (err < 0)
-		return err;
-
-	err = bpf_obj_get_IB(&attr);
-	
-
-	return err;
-}
-
-SYSCALL_DEFINE1(bpf_ib_test, int , cmd)
-{
-	const char *pathname= "/sys/fs/bpf/oliver_agg";
-	const size_t attr_sz = offsetofend(union bpf_attr, file_flags);
-	union bpf_attr attr;
-
-	printk("/************testing************/\n");
-	memset(&attr, 0, attr_sz);
-	attr.pathname = (__u64)(unsigned long)((void *)pathname);
-	attr.file_flags = 0;
-	// printk("the path name is %s, flag is %d\n",attr.prog_name,attr.file_flags);
-	return  __sys_bpf_ib(KERNEL_BPFPTR(&attr),attr_sz);
-
-
-}
-
 static bool syscall_prog_is_valid_access(int off, int size,
 					 enum bpf_access_type type,
 					 const struct bpf_prog *prog,
@@ -5156,19 +5100,7 @@ BPF_CALL_3(bpf_sys_bpf, int, cmd, union bpf_attr *, attr, u32, attr_size)
 	return __sys_bpf(cmd, KERNEL_BPFPTR(attr), attr_size);
 }
 
-int bpf_obj_get_ib(const char *pathname)
-{
-	const size_t attr_sz = offsetofend(union bpf_attr, file_flags);
-	union bpf_attr attr;
-	int fd;
-	memset(&attr, 0, attr_sz);
-	attr.pathname = (__u64)(unsigned long)((void *)pathname);
-	attr.file_flags = 0;
-	// printk("the path name is %s, flag is %d\n",attr.prog_name,attr.file_flags);
-	fd  = __sys_bpf_ib(KERNEL_BPFPTR(&attr),attr_sz);
-	return fd;
-}
-EXPORT_SYMBOL_GPL(bpf_obj_get_ib);
+
 /* To shut up -Wmissing-prototypes.
  * This function is used by the kernel light skeleton
  * to load bpf programs when modules are loaded or during kernel boot.

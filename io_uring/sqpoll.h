@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/bpf.h>
+
 struct io_sq_data {
 	refcount_t		refs;
 	atomic_t		park_pending;
@@ -18,12 +18,6 @@ struct io_sq_data {
 
 	unsigned long		state;
 	struct completion	exited;
-	struct bpf_map *map;
-	struct bpf_map *router;
-	struct bpf_map *qemurouter;
-	struct bpf_map *map_d;
-	int begin;
-	
 };
 
 int io_sq_offload_create(struct io_ring_ctx *ctx, struct io_uring_params *p);

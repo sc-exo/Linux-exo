@@ -371,7 +371,6 @@ static void __io_poll_execute(struct io_kiocb *req, int mask)
 		req->io_task_work.func = io_apoll_task_func;
 
 	trace_io_uring_task_add(req, mask);
-	printk("__io_poll_execute\n");
 	io_req_task_work_add(req);
 }
 

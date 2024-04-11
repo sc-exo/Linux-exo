@@ -72,7 +72,6 @@ struct open_how;
 struct mount_attr;
 struct landlock_ruleset_attr;
 enum landlock_rule_type;
-struct xrp_stats;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
@@ -498,8 +497,14 @@ asmlinkage long sys_llseek(unsigned int fd, unsigned long offset_high,
 asmlinkage long sys_lseek(unsigned int fd, off_t offset,
 			  unsigned int whence);
 asmlinkage long sys_read(unsigned int fd, char __user *buf, size_t count);
+asmlinkage long sys_load_ebpf_host(unsigned int fd, char __user *data_buf,
+                      size_t count, loff_t pos, unsigned long int bpf_ino);
 asmlinkage long sys_write(unsigned int fd, const char __user *buf,
 			  size_t count);
+asmlinkage long sys_write_ib(unsigned int fd, const char __user *buf,
+			  size_t count, unsigned int ib_enable);
+asmlinkage long sys_read_ib(unsigned int fd, const char __user *buf,
+			  size_t count, loff_t pos, unsigned int ib_enable, char __user *scratch_buf);				  
 asmlinkage long sys_readv(unsigned long fd,
 			  const struct iovec __user *vec,
 			  unsigned long vlen);
@@ -1009,7 +1014,6 @@ asmlinkage long sys_getrandom(char __user *buf, size_t count,
 			      unsigned int flags);
 asmlinkage long sys_memfd_create(const char __user *uname_ptr, unsigned int flags);
 asmlinkage long sys_bpf(int cmd, union bpf_attr *attr, unsigned int size);
-asmlinkage long sys_bpf_ib_test(int cmd);
 asmlinkage long sys_execveat(int dfd, const char __user *filename,
 			const char __user *const __user *argv,
 			const char __user *const __user *envp, int flags);
@@ -1144,7 +1148,6 @@ asmlinkage long sys_utimes(char __user *filename,
 asmlinkage long sys_futimesat(int dfd, const char __user *filename,
 			      struct __kernel_old_timeval __user *utimes);
 #endif
-
 asmlinkage long sys_futimesat_time32(unsigned int dfd,
 				     const char __user *filename,
 				     struct old_timeval32 __user *t);
@@ -1383,8 +1386,6 @@ long compat_ksys_semtimedop(int semid, struct sembuf __user *tsems,
 long __do_semtimedop(int semid, struct sembuf *tsems, unsigned int nsops,
 		     const struct timespec64 *timeout,
 		     struct ipc_namespace *ns);
-asmlinkage long sys_print_xrp_stats(struct xrp_stats __user *buf);
-asmlinkage long sys_test_xrp(char __user *data_buf, char __user *scratch_buf, unsigned int bpf_fd);
 
 int __sys_getsockopt(int fd, int level, int optname, char __user *optval,
 		int __user *optlen);

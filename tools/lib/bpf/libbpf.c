@@ -8540,7 +8540,6 @@ static const struct bpf_sec_def section_defs[] = {
 	SEC_DEF("cgroup/dev",		CGROUP_DEVICE, BPF_CGROUP_DEVICE, SEC_ATTACHABLE_OPT),
 	SEC_DEF("struct_ops+",		STRUCT_OPS, 0, SEC_NONE),
 	SEC_DEF("sk_lookup",		SK_LOOKUP, BPF_SK_LOOKUP, SEC_ATTACHABLE),
-	SEC_DEF("iouring",			IOURING, 	BPF_IOURING, SEC_ATTACHABLE|SEC_SLEEPABLE),
 };
 
 static size_t custom_sec_def_cnt;

@@ -523,10 +523,6 @@ const struct io_op_def io_op_defs[] = {
 		.prep			= io_eopnotsupp_prep,
 #endif
 	},
-	[IORING_OP_BPF] = {
-		.name			= "BPF",
-		.prep			= io_eopnotsupp_prep,
-	},
 };
 
 const char *io_uring_get_opcode(u8 opcode)

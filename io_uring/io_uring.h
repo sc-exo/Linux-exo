@@ -7,7 +7,7 @@
 #include "io-wq.h"
 #include "slist.h"
 #include "filetable.h"
-#include <linux/bpf.h>
+
 #ifndef CREATE_TRACE_POINTS
 #include <trace/events/io_uring.h>
 #endif
@@ -24,37 +24,7 @@ enum {
 	IOU_STOP_MULTISHOT	= -ECANCELED,
 };
 
-
-
-
-
-typedef struct fast_map {
-    struct iovec iovec[256];
-    uint32_t in_num;
-    uint32_t out_num;
-    uint32_t type;
-    bool fast;
-    uint32_t wfd;
-    uint32_t fd;
-    uint32_t id;
-    uint64_t offset;
-} Fast_map;
-struct io_uring_bpf_ctx {
-	__u32	vq_num;
-	__u64	vq_addr;
-	__u64	L1Cache;
-	__u64	L2Cache;
-	__u8 qemu_router;
-	int   begin;
-};
-int io_bpf_unregister(struct io_ring_ctx *ctx);
-int io_bpf_register_vqaddr(struct io_ring_ctx *ctx, void __user *arg);
-int io_bpf_register_vqfd(struct io_ring_ctx *ctx, void __user *arg);
-int io_bpf_register_L1Cache(struct io_ring_ctx *ctx, void __user *arg);
-int io_bpf_register_L2Cache(struct io_ring_ctx *ctx, void __user *arg);
-int io_bpf_register_L2Ref(struct io_ring_ctx *ctx, void __user *arg);
 struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx, bool overflow);
-struct io_uring_sqe *io_get_sqe_bpf(struct io_ring_ctx *ctx);
 bool io_req_cqe_overflow(struct io_kiocb *req);
 int io_run_task_work_sig(struct io_ring_ctx *ctx);
 int __io_run_local_work(struct io_ring_ctx *ctx, bool *locked);
@@ -93,6 +63,7 @@ void tctx_task_work(struct callback_head *cb);
 __cold void io_uring_cancel_generic(bool cancel_all, struct io_sq_data *sqd);
 int io_uring_alloc_task_context(struct task_struct *task,
 				struct io_ring_ctx *ctx);
+
 int io_poll_issue(struct io_kiocb *req, bool *locked);
 int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr);
 int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin);
@@ -387,6 +358,7 @@ static inline bool io_alloc_req_refill(struct io_ring_ctx *ctx)
 static inline struct io_kiocb *io_alloc_req(struct io_ring_ctx *ctx)
 {
 	struct io_wq_work_node *node;
+
 	node = wq_stack_extract(&ctx->submit_state.free_list);
 	return container_of(node, struct io_kiocb, comp_list);
 }

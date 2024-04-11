@@ -86,34 +86,6 @@ __u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n)
 }
 EXPORT_SYMBOL_GPL(eventfd_signal);
 
-__u64 eventfd_signal_evo(struct eventfd_ctx *ctx, __u64 n)
-{
-	unsigned long flags;
-
-	/*
-	 * Deadlock or stack overflow issues can happen if we recurse here
-	 * through waitqueue wakeup handlers. If the caller users potentially
-	 * nested waitqueues with custom wakeup handlers, then it should
-	 * check eventfd_signal_allowed() before calling this function. If
-	 * it returns false, the eventfd_signal() call should be deferred to a
-	 * safe context.
-	 */
-	if (WARN_ON_ONCE(current->in_eventfd))
-		return 0;
-	spin_lock_irqsave(&ctx->wqh.lock, flags);
-	current->in_eventfd = 1;
-	if (ULLONG_MAX - ctx->count < n)
-		n = ULLONG_MAX - ctx->count;
-	ctx->count += n;
-	if (waitqueue_active(&ctx->wqh))
-		wake_up_locked_poll(&ctx->wqh, EPOLLIN);
-	current->in_eventfd = 0;
-	spin_unlock_irqrestore(&ctx->wqh.lock, flags);
-	return n;
-}
-EXPORT_SYMBOL_GPL(eventfd_signal_evo);
-
-
 static void eventfd_free_ctx(struct eventfd_ctx *ctx)
 {
 	if (ctx->id >= 0)
@@ -340,58 +312,6 @@ static ssize_t eventfd_write(struct file *file, const char __user *buf, size_t c
 
 	return res;
 }
-
-ssize_t eventfd_write_ib(unsigned int fd)
-{
-	struct fd f; 
-	struct file *file;
-	struct eventfd_ctx *ctx; 
-		ssize_t res;
-	__u64 ucnt;
-
-	
-	f = fdget_pos(fd);
-	if (!f.file)
-		return -EBADF;
-	file= f.file;
-	ctx	= file->private_data;
-
-	DECLARE_WAITQUEUE(wait, current);
-
-	ucnt = 1;
-	if (ucnt == ULLONG_MAX)
-		return -EINVAL;
-	
-	res = -EAGAIN;
-	if (ULLONG_MAX - ctx->count > ucnt)
-		res = sizeof(ucnt);
-	else if (!(file->f_flags & O_NONBLOCK)) {
-		__add_wait_queue(&ctx->wqh, &wait);
-		for (res = 0;;) {
-			set_current_state(TASK_INTERRUPTIBLE);
-			if (ULLONG_MAX - ctx->count > ucnt) {
-				res = sizeof(ucnt);
-				break;
-			}
-			if (signal_pending(current)) {
-				res = -ERESTARTSYS;
-				break;
-			}
-			schedule();
-		}
-		__remove_wait_queue(&ctx->wqh, &wait);
-		__set_current_state(TASK_RUNNING);
-	}
-	if (likely(res > 0)) {
-		ctx->count += ucnt;
-		current->in_eventfd = 1;
-		if (waitqueue_active(&ctx->wqh))
-			wake_up_locked_poll(&ctx->wqh, EPOLLIN);
-		current->in_eventfd = 0;
-	}
-	return res;
-}
-EXPORT_SYMBOL_GPL(eventfd_write_ib);
 
 #ifdef CONFIG_PROC_FS
 static void eventfd_show_fdinfo(struct seq_file *m, struct file *f)

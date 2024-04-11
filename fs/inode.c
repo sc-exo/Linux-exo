@@ -271,12 +271,12 @@ static struct inode *alloc_inode(struct super_block *sb)
 		}
 		inode->free_inode = ops->free_inode;
 		inode->ib_enable=0;
+		inode->ib_es_num=0;
+		inode->ib_es_first=1;
 		i_callback(&inode->i_rcu);
 		return NULL;
 	}
-	inode->i_es_tree.rb_root = RB_ROOT;
-	inode->i_es_tree.cache_es=NULL;
-	spin_lock_init(&inode->xrp_extent_lock);
+
 	return inode;
 }
 
@@ -1774,7 +1774,6 @@ retry:
 			goto retry;
 		}
 		iput_final(inode);
-		xrp_clear_tree(inode);
 	}
 }
 EXPORT_SYMBOL(iput);

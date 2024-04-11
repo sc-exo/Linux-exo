@@ -137,7 +137,6 @@ static void io_fail_links(struct io_kiocb *req)
 
 	link = req->link;
 	link->io_task_work.func = io_req_tw_fail_links;
-	printk("io_fail_links\n");
 	io_req_task_work_add(link);
 	req->link = NULL;
 }
@@ -214,7 +213,6 @@ static enum hrtimer_restart io_timeout_fn(struct hrtimer *timer)
 
 	io_req_set_res(req, -ETIME, 0);
 	req->io_task_work.func = io_req_task_complete;
-	printk("io_timeout_fn\n");
 	io_req_task_work_add(req);
 	return HRTIMER_NORESTART;
 }
@@ -319,7 +317,6 @@ static enum hrtimer_restart io_link_timeout_fn(struct hrtimer *timer)
 	spin_unlock_irqrestore(&ctx->timeout_lock, flags);
 
 	req->io_task_work.func = io_req_task_link_timeout;
-	printk("io_link_timeout_fn\n");
 	io_req_task_work_add(req);
 	return HRTIMER_NORESTART;
 }

@@ -30,7 +30,6 @@
 #include <linux/virtio_config.h>
 #include <linux/virtio_types.h>
 #include <linux/fs.h>
-
 /* Feature bits */
 #define VIRTIO_BLK_F_SIZE_MAX	1	/* Indicates maximum segment size */
 #define VIRTIO_BLK_F_SEG_MAX	2	/* Indicates maximum # of segments */
@@ -180,15 +179,25 @@ struct virtio_blk_config {
 #define VIRTIO_BLK_T_BARRIER	0x80000000
 #endif /* !VIRTIO_BLK_NO_LEGACY */
 
+struct ib_mesg {
+	__u8 status;
+	struct MaybeValue query;
+};
 /*
  * This comes first in the read scatter-gather list.
  * For legacy virtio, if VIRTIO_F_ANY_LAYOUT is not negotiated,
  * this is the first element of the read scatter-gather list.
  */
+struct host_extent_status {
+	__u32 es_lblk;	/* first logical block extent covers */
+	__u32 es_len;	/* length of extent in block */
+	__u64 es_pblk;	/* first physical block */
+};
 struct virtio_blk_outhdr {
-	// unsigned int 	ib_enable;
-	// struct host_extent_status ib_es[15];
-	// unsigned int 	ib_es_num;
+	unsigned int 	ib_enable;
+	struct host_extent_status ib_es[15];
+	unsigned int 	ib_es_num;
+	
 	/* VIRTIO_BLK_T* */
 	__virtio32 type;
 	/* io priority. */

@@ -372,9 +372,9 @@
 448	common	process_mrelease	sys_process_mrelease
 449	common	futex_waitv		sys_futex_waitv
 450	common	set_mempolicy_home_node	sys_set_mempolicy_home_node
-451	common	print_xrp_stats		sys_print_xrp_stats
-452 common	test_xrp		sys_test_xrp
-453	common	bpf_ib_test			sys_bpf_ib_test
+451 common  write_ib        sys_write_ib
+452 common  read_ib        sys_read_ib
+453 common	load_ebpf_host	        sys_load_ebpf_host
 #
 # Due to a historical design error, certain syscalls are numbered differently
 # in x32 as compared to native x86_64.  These syscalls have numbers 512-547.

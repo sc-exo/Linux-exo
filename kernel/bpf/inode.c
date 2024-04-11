@@ -506,60 +506,19 @@ static void *bpf_obj_do_get(const char __user *pathname,
 	ret = user_path_at(AT_FDCWD, pathname, LOOKUP_FOLLOW, &path);
 	if (ret)
 		return ERR_PTR(ret);
+
 	inode = d_backing_inode(path.dentry);
 	ret = path_permission(&path, ACC_MODE(flags));
 	if (ret)
 		goto out;
-	
+
 	ret = bpf_inode_type(inode, type);
 	if (ret)
 		goto out;
+
 	raw = bpf_any_get(inode->i_private, *type);
 	if (!IS_ERR(raw))
 		touch_atime(&path);
-
-	path_put(&path);
-	return raw;
-out:
-	path_put(&path);
-	return ERR_PTR(ret);
-}
-
-
-static void *bpf_obj_do_get_ib(const char *pathname,
-			    enum bpf_type *type, int flags)
-{
-	struct inode *inode;
-	struct path path;
-	void *raw;
-	int ret;
-	ret = user_path_at_ib(AT_FDCWD, pathname, LOOKUP_FOLLOW, &path);
-	if (ret)
-	{
-		// printk("bpf_obj_get_ib is fail here 0-1\n");
-		return ERR_PTR(ret);
-	}
-		
-	inode = d_backing_inode(path.dentry);
-	ret = path_permission(&path, ACC_MODE(flags));
-	if (ret)
-	{
-		// printk("bpf_obj_get_ib is fail here 0-2\n");
-		goto out;
-	}
-		
-	ret = bpf_inode_type(inode, type);
-	if (ret)
-	{
-		// printk("bpf_obj_get_ib is fail here 0-3\n");
-		goto out;
-	}
-	raw = bpf_any_get(inode->i_private, *type);
-	if (!IS_ERR(raw))
-	{
-		touch_atime(&path);
-	}
-		
 
 	path_put(&path);
 	return raw;
@@ -578,11 +537,11 @@ int bpf_obj_get_user(const char __user *pathname, int flags)
 	f_flags = bpf_get_file_flag(flags);
 	if (f_flags < 0)
 		return f_flags;
-	
+
 	raw = bpf_obj_do_get(pathname, &type, f_flags);
 	if (IS_ERR(raw))
 		return PTR_ERR(raw);
-	
+
 	if (type == BPF_TYPE_PROG)
 		ret = bpf_prog_new_fd(raw);
 	else if (type == BPF_TYPE_MAP)
@@ -594,47 +553,6 @@ int bpf_obj_get_user(const char __user *pathname, int flags)
 
 	if (ret < 0)
 		bpf_any_put(raw, type);
-	return ret;
-}
-
-int bpf_obj_get_user_ib(const char *pathname, int flags)
-{
-	enum bpf_type type = BPF_TYPE_UNSPEC;
-	int f_flags;
-	void *raw;
-	int ret;
-	
-	f_flags = bpf_get_file_flag(flags);
-	if (f_flags < 0)
-	{
-		return f_flags;
-	}
-		
-	
-	raw = bpf_obj_do_get_ib(pathname, &type, f_flags);
-	if (IS_ERR(raw))
-	{
-		return PTR_ERR(raw);
-	}
-		
-	
-	if (type == BPF_TYPE_PROG)
-		ret = bpf_prog_new_fd(raw);
-	else if (type == BPF_TYPE_MAP)
-		ret = bpf_map_new_fd(raw, f_flags);
-	else if (type == BPF_TYPE_LINK)
-		ret = (f_flags != O_RDWR) ? -EINVAL : bpf_link_new_fd(raw);
-	else
-	{
-		return -ENOENT;
-	}
-		
-
-	if (ret < 0)
-	{
-		bpf_any_put(raw, type);
-	}
-		
 	return ret;
 }
 

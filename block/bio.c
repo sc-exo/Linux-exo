@@ -253,7 +253,8 @@ void bio_init(struct bio *bio, struct block_device *bdev, struct bio_vec *table,
 	bio->bi_iter.bi_bvec_done = 0;
 	bio->bi_end_io = NULL;
 	bio->bi_private = NULL;
-	bio->xrp_enabled = 0;
+	bio->ib_enable = 0;
+	bio->ib_es_num = 0;
 #ifdef CONFIG_BLK_CGROUP
 	bio->bi_blkg = NULL;
 	bio->bi_issue.value = 0;

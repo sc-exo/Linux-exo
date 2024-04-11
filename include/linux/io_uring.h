@@ -36,8 +36,6 @@ struct io_uring_cmd {
 };
 
 #if defined(CONFIG_IO_URING)
-int wake_up_iouring_evo(unsigned int fd, u32 flags);
-// int io_pop_evo(int vq_num, struct io_ring_ctx *ctx);
 int io_uring_cmd_import_fixed(u64 ubuf, unsigned long len, int rw,
 			      struct iov_iter *iter, void *ioucmd);
 void io_uring_cmd_done(struct io_uring_cmd *cmd, ssize_t ret, ssize_t res2);

@@ -11,9 +11,9 @@
 #include <linux/audit.h>
 #include <linux/security.h>
 #include <linux/io_uring.h>
-#include <linux/eventfd.h>
+
 #include <uapi/linux/io_uring.h>
-#include <linux/filter.h>
+
 #include "io_uring.h"
 #include "sqpoll.h"
 
@@ -89,10 +89,6 @@ void io_sq_thread_finish(struct io_ring_ctx *ctx)
 	struct io_sq_data *sqd = ctx->sq_data;
 
 	if (sqd) {
-		sqd->map = NULL;
-		sqd->router = NULL;
-		sqd->qemurouter = NULL;
-		sqd->map_d = NULL;
 		io_sq_thread_park(sqd);
 		list_del_init(&ctx->sqd_list);
 		io_sqd_update_thread_idle(sqd);
@@ -221,44 +217,13 @@ static bool io_sqd_handle_event(struct io_sq_data *sqd)
 	}
 	return did_sig || test_bit(IO_SQ_THREAD_SHOULD_STOP, &sqd->state);
 }
-noinline int io_pop_evo(int vq_num, struct io_ring_ctx *ctx)
-{
-	int vq_num2;//meanless just a noop, in order to kprobe
-	vq_num2 = vq_num;
-	ctx->iobpf.vq_num = vq_num2;
-	// printk("io_pop_evo is ok 2,nr_bpf_progs is %d\n",ctx->nr_bpf_progs);
-	// printk("io_pop_evo the ctx addr is %lx\n",ctx);
-	if(ctx->nr_bpf_progs>0)
-	{
-		bpf_prog_run(ctx->bpf_progs[0].prog, ctx);
-	}
-	return vq_num2;
-}
-// EXPORT_SYMBOL_GPL(io_pop_evo)
 
 static int io_sq_thread(void *data)
 {
 	struct io_sq_data *sqd = data;
 	struct io_ring_ctx *ctx;
-	struct eventfd_ctx *eventfd;
-	int *key;
-	int vq_id;
-	int vq_id2;
-	int i=0;
-	int err;
-	u64 router;
-	unsigned int router2=0;
-	unsigned int temp;
-	struct bpf_map *router_map;
-	struct bpf_map *qemurouter_map;
-	struct bpf_map *map_d;
-	int vq_fd = 79;
-	int router_fd;
-	int Qemurouter_fd;
-	int map_d_fd;
 	unsigned long timeout = 0;
 	char buf[TASK_COMM_LEN];
-	u64 KVM_router;
 	DEFINE_WAIT(wait);
 
 	snprintf(buf, sizeof(buf), "iou-sqp-%d", sqd->task_pid);
@@ -273,6 +238,7 @@ static int io_sq_thread(void *data)
 	mutex_lock(&sqd->lock);
 	while (1) {
 		bool cap_entries, sqt_spin = false;
+
 		if (io_sqd_events_pending(sqd) || signal_pending(current)) {
 			if (io_sqd_handle_event(sqd))
 				break;
@@ -281,67 +247,25 @@ static int io_sq_thread(void *data)
 
 		cap_entries = !list_is_singular(&sqd->ctx_list);
 		list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
-			if(ctx->qemu.vqfd!=0)
-				vq_fd = ctx->qemu.vqfd;
-			temp = 0;
-			KVM_router = 0;
-			
-			if(ctx->router_enable)
-			{
-				router = 0x0;
-				vq_id = ctx->vqid;
-				
-				KVM_router = ctx->router->router;
-				if(KVM_router>0)
-				{
-					
-					router = KVM_router;
-					
-					ctx->router->router = 0;
-					
-				}
-				
-				//before proccess check whether has req to be processed
-				ctx->qemu.qemu_router = 0;
-				if(router>0)
-				{	
+			int ret = __io_sq_thread(ctx, cap_entries);
 
-					if(sqd->begin>0)
-						sqd->begin--;
-					ctx->qemu.begin = sqd->begin;
-					vq_id2 =  io_pop_evo(ctx->vqid,ctx);
-					
-					if(ctx->qemu.qemu_router == 0) //after pop, check whether notiy qemu
-					{
-							eventfd = eventfd_ctx_fdget(vq_fd+ctx->vqid);
-							if(eventfd)
-								eventfd_signal_evo(eventfd,1);
-							eventfd_ctx_put(eventfd);
-					}
-					// printk("vq is %d, router is %u\n",vq_id,router);
-					ctx->qemu.qemu_router = 0;
-					sqd->begin = ctx->qemu.begin;
-				}				
-				
-			}
-
-
-			// int ret = __io_sq_thread(ctx, cap_entries);
-
-			// if (!sqt_spin && (ret > 0 || !wq_list_empty(&ctx->iopoll_list)))
-			// 	sqt_spin = true;
+			if (!sqt_spin && (ret > 0 || !wq_list_empty(&ctx->iopoll_list)))
+				sqt_spin = true;
 		}
 		if (io_run_task_work())
 			sqt_spin = true;
+
 		if (sqt_spin || !time_after(jiffies, timeout)) {
 			cond_resched();
 			if (sqt_spin)
 				timeout = jiffies + sqd->sq_thread_idle;
 			continue;
 		}
+
 		prepare_to_wait(&sqd->wait, &wait, TASK_INTERRUPTIBLE);
 		if (!io_sqd_events_pending(sqd) && !task_work_pending(current)) {
 			bool needs_sched = true;
+
 			list_for_each_entry(ctx, &sqd->ctx_list, sqd_list) {
 				atomic_or(IORING_SQ_NEED_WAKEUP,
 						&ctx->rings->sq_flags);
@@ -356,11 +280,13 @@ static int io_sq_thread(void *data)
 				 * reordered with the load of the SQ tail
 				 */
 				smp_mb__after_atomic();
+
 				if (io_sqring_entries(ctx)) {
 					needs_sched = false;
 					break;
 				}
 			}
+
 			if (needs_sched) {
 				mutex_unlock(&sqd->lock);
 				schedule();
@@ -370,6 +296,7 @@ static int io_sq_thread(void *data)
 				atomic_andnot(IORING_SQ_NEED_WAKEUP,
 						&ctx->rings->sq_flags);
 		}
+
 		finish_wait(&sqd->wait, &wait);
 		timeout = jiffies + sqd->sq_thread_idle;
 	}
@@ -425,11 +352,6 @@ __cold int io_sq_offload_create(struct io_ring_ctx *ctx,
 	if (ctx->flags & IORING_SETUP_SQPOLL) {
 		struct task_struct *tsk;
 		struct io_sq_data *sqd;
-		struct bpf_map *map;
-		struct bpf_map *map_d;
-		struct bpf_map *router;
-		struct bpf_map *qemurouter;
-		
 		bool attached;
 
 		ret = security_uring_sqpoll();
@@ -470,81 +392,9 @@ __cold int io_sq_offload_create(struct io_ring_ctx *ctx,
 		} else {
 			sqd->sq_cpu = -1;
 		}
-		
-		if (p->map_fd==0)
-		{
-			printk("map_fd get error \n");
-		}else
-		{
-			map = bpf_map_get(p->map_fd);
-			if (IS_ERR(map))
-			{
-				printk("bpf get error \n");
-			}
-			if(map!=NULL)
-			{
-				sqd->map = map;
-				
-			}
-		}
-		if (p->router_fd==0)
-		{
-			printk("map_fd get error \n");
-		}else
-		{
-			router = bpf_map_get(p->router_fd);
-			if (IS_ERR(router))
-			{
-				printk("bpf get error \n");
-			}
-			if(router!=NULL)
-			{
-				sqd->router = router;
-				
-			}
-		}
-		if (p->qemurouter_fd==0)
-		{
-			printk("qemurouter_fd get error \n");
-		}else
-		{
-			qemurouter = bpf_map_get(p->qemurouter_fd);
-			if (IS_ERR(qemurouter))
-			{
-				printk("bpf get error \n");
-			}
-			if(qemurouter!=NULL)
-			{
-				sqd->qemurouter = qemurouter;
-				
-			}
-		}
-		if (p->map_d_fd==0)
-		{
-			printk("qemurouter_fd get error \n");
-		}else
-		{
-			map_d = bpf_map_get(p->map_d_fd);
-			if (IS_ERR(map_d))
-			{
-				printk("bpf get error \n");
-			}
-			if(map_d!=NULL)
-			{
-				sqd->map_d = map_d;
-				
-			}
-		}
-		sqd->begin = 500;
+
 		sqd->task_pid = current->pid;
 		sqd->task_tgid = current->tgid;
-		if((p->map_fd!=0)||(p->map_d_fd!=0)||(p->router_fd!=0)||(p->qemurouter_fd!=0))
-		{
-			if(sqd->map==NULL||sqd->router==NULL||sqd->qemurouter==NULL||sqd->map_d==NULL)
-				goto err_sqpoll;
-		}
-		
-		printk("create_io_thread \n");
 		tsk = create_io_thread(io_sq_thread, sqd, NUMA_NO_NODE);
 		if (IS_ERR(tsk)) {
 			ret = PTR_ERR(tsk);
@@ -553,14 +403,6 @@ __cold int io_sq_offload_create(struct io_ring_ctx *ctx,
 
 		sqd->thread = tsk;
 		ret = io_uring_alloc_task_context(tsk, ctx);
-		if(sqd->map!=NULL)
-		{
-			ctx->map = sqd->map;
-		}
-		if(sqd->map_d!=NULL)
-		{
-			ctx->map_d = sqd->map_d;
-		}
 		wake_up_new_task(tsk);
 		if (ret)
 			goto err;

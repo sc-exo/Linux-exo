@@ -25,7 +25,7 @@
 #define BPF_REG_TMP	BPF_REG_8
 
 /* BPF program can access up to 512 bytes of stack space. */
-#define MAX_BPF_STACK	1024
+#define MAX_BPF_STACK	512
 
 /* Helper macros for filter block array initializers. */
 
